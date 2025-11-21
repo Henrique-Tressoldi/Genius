@@ -7,6 +7,8 @@ from collections import Counter
 import time
 import os
 import base64
+from google.api_core import exceptions as ga_exceptions
+import logging
 
 # ==============================================================================
 # 1. CONFIGURAÇÃO E ESTILOS (Separado para não quebrar)
@@ -276,6 +278,20 @@ def get_model(api_key):
         return genai.GenerativeModel('gemini-1.5-pro'), safety
     except: return None, None
 
+# Helper to call the model with guarded error handling (avoids crash on quota/errors)
+def _safe_generate(prompt_text: str):
+    if not model:
+        return "Offline: modelo indisponível."
+    try:
+        with st.spinner('Analisando...'):
+            return model.generate_content(prompt_text, safety_settings=safety).text.strip()
+    except ga_exceptions.ResourceExhausted:
+        logging.exception('ResourceExhausted from generative API')
+        return "Erro: recurso ou cota esgotada. Tente novamente mais tarde ou verifique limites na conta." 
+    except Exception as e:
+        logging.exception('Erro ao chamar a API generativa')
+        return f"Erro na geração da IA: {str(e)}"
+
 # ==============================================================================
 # Sidebar removed: user requested no sidebar UI. Initialize model programmatically
 # ==============================================================================
@@ -313,7 +329,7 @@ with tab_sup:
             for i, row in df.head(3).iterrows():
                 msg = row['mensagem_cliente']
                 prompt = f"Classifique (URGENTE/MEDIA/BAIXA) e justifique em 1 frase: '{msg}'"
-                res = model.generate_content(prompt, safety_settings=safety).text.strip() if model else "Offline"
+                res = _safe_generate(prompt)
                 
                 tag, cls = ("BAIXA", "tag-BAIXA")
                 if "URGENTE" in res.upper(): tag, cls = "URGENTE", "tag-URGENTE"
@@ -356,7 +372,7 @@ with tab_vend:
             if st.button("✨ GERAR OFERTA AGORA"):
                 with st.spinner("Analisando..."):
                     prompt = f"Crie nome de combo e descrição curta para {campeao} + Batata. Sem titulos. Formato texto simples."
-                    res = model.generate_content(prompt, safety_settings=safety).text if model else "Erro IA"
+                    res = _safe_generate(prompt)
                     if res:
                         # CORREÇÃO: MOSTRAR RESULTADO EM CAIXA VISÍVEL
                         st.markdown(f"""<div class="ai-result-box"><strong>✅ Sugestão Gerada:</strong><br><br>{res.replace(chr(10), '<br>')}</div>""", unsafe_allow_html=True)
@@ -390,7 +406,7 @@ with tab_crm:
                     
                     if st.button("🚀 ENVIAR PUSH NOTIFICATION"):
                         prompt = f"Aja como iFood. Cliente: {target}. Favorito: {fav}. Escreva 1 push curta, urgente, emoji. Sem listas. Texto puro."
-                        res = model.generate_content(prompt, safety_settings=safety).text.strip() if model else "Offline"
+                        res = _safe_generate(prompt)
                         st.session_state['push_msg'] = res
                         st.session_state['push_item'] = fav
             
@@ -439,7 +455,7 @@ with tab_chat:
                 """
                 
                 # Chama a IA
-                resposta = model.generate_content(prompt, safety_settings=safety).text.strip()
+                resposta = _safe_generate(prompt)
             except: 
                 resposta = "Erro ao processar IA."
         
