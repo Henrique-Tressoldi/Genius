@@ -7,6 +7,8 @@ from collections import Counter
 import time
 import os
 import base64
+import datetime
+import uuid
 from google.api_core import exceptions as ga_exceptions
 import logging
 
@@ -428,13 +430,23 @@ with tab_chat:
     def processar_pergunta(texto_pergunta):
         if not texto_pergunta: return
         
-        # 1. Evita duplicidade: Se a última mensagem for igual, ignora
+        # 1. Evita duplicidade: só ignora se já existir um par recente user->assistant
         hist = st.session_state.get('chat_history', [])
-        if len(hist) > 0 and hist[-1]['role'] == 'user' and hist[-1]['text'] == texto_pergunta:
+        if len(hist) >= 2 and hist[-2].get('role') == 'user' and hist[-1].get('role') == 'assistant' and hist[-2].get('text') == texto_pergunta:
             return
 
         # 2. Adiciona pergunta ao histórico
         st.session_state['chat_history'].append({'role': 'user', 'text': texto_pergunta})
+
+        # Debug/tracing: registra início do processamento (visível no UI se ativado)
+        run_id = uuid.uuid4().hex[:8]
+        start_ts = datetime.datetime.utcnow()
+        st.session_state['last_process'] = {
+            'id': run_id,
+            'question': texto_pergunta,
+            'status': 'started',
+            'start': start_ts.isoformat() + 'Z'
+        }
         
         # 3. Gera resposta da IA
         resposta = "Offline"
@@ -456,6 +468,13 @@ with tab_chat:
                 
                 # Chama a IA
                 resposta = _safe_generate(prompt)
+                # Atualiza debug com fim e duração
+                end_ts = datetime.datetime.utcnow()
+                try:
+                    dur = (end_ts - start_ts).total_seconds()
+                except Exception:
+                    dur = None
+                st.session_state['last_process'].update({'status': 'done', 'end': end_ts.isoformat() + 'Z', 'duration_s': dur})
             except: 
                 resposta = "Erro ao processar IA."
         
@@ -469,6 +488,26 @@ with tab_chat:
         if 'chat_history' not in st.session_state: 
             st.session_state['chat_history'] = []
 
+        # Debug toggle (mostra último processamento)
+        if 'show_debug' not in st.session_state:
+            st.session_state['show_debug'] = True
+        show_debug = st.checkbox('Mostrar debug de processamento', value=st.session_state['show_debug'], key='show_debug')
+        if show_debug and st.session_state.get('last_process'):
+            lp = st.session_state['last_process']
+            status = lp.get('status')
+            q = lp.get('question')
+            start = lp.get('start')
+            end = lp.get('end', '---')
+            dur = lp.get('duration_s', None)
+            st.markdown(f"""
+                <div style='background:#fff7ed; border:1px solid #ffd8a8; padding:10px; border-radius:8px; margin-bottom:8px;'>
+                    <div style='font-size:0.85rem; color:#92400e; font-weight:700;'>Debug: last process</div>
+                    <div style='font-size:0.85rem; color:#333;'><strong>id:</strong> {lp.get('id')} &nbsp; <strong>status:</strong> {status}</div>
+                    <div style='font-size:0.85rem; color:#333;'><strong>start:</strong> {start} &nbsp; <strong>end:</strong> {end} &nbsp; <strong>dur(s):</strong> {dur}</div>
+                    <div style='font-size:0.85rem; color:#333; margin-top:6px;'><strong>question:</strong> {q}</div>
+                </div>
+            """, unsafe_allow_html=True)
+
         # --- 1. ÁREA DE INPUT (FIXA NO TOPO) ---
         with st.form(key='chat_form', clear_on_submit=True):
             u_input = st.text_input("Digite sua pergunta:", placeholder="Ex: Qual cliente comprou mais?", key="top_chat_input")
@@ -476,7 +515,6 @@ with tab_chat:
             # Botão de envio dentro do form
             if st.form_submit_button("Enviar Pergunta"):
                 processar_pergunta(u_input)
-                _safe_rerun() # Reinicia para mostrar a resposta imediatamente
 
         # --- 2. ÁREA DE MENSAGENS (ORDEM INVERSA) ---
         # Vamos criar pares [Pergunta, Resposta] e mostrar os mais novos primeiro
@@ -524,12 +562,9 @@ with tab_chat:
         # Botões que acionam a pergunta automaticamente
         if st.button("💰 Faturamento Total?"):
             processar_pergunta("Qual o faturamento total somando tudo?")
-            _safe_rerun()
             
         if st.button("🏆 Melhor Cliente?"):
             processar_pergunta("Quem é o cliente que mais gastou?")
-            _safe_rerun()
             
         if st.button("🍔 Item mais vendido?"):
             processar_pergunta("Qual o produto mais vendido?")
-            _safe_rerun()
