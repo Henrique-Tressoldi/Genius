@@ -253,7 +253,11 @@ def render_phone_mockup(item, msg):
 # ==============================================================================
 # 3. BACKEND (IA E LÓGICA)
 # ==============================================================================
-DEFAULT_KEY = "AIzaSyAmGv-zgqUEFZ_sYlbsQq4acVEN-iFaPb4"
+# Tenta pegar dos segredos do Streamlit, ou usa vazio se não achar
+try:
+    DEFAULT_KEY = st.secrets["GEMINI_KEY"]
+except:
+    DEFAULT_KEY = ""
 
 @st.cache_resource
 def get_model(api_key):
@@ -273,29 +277,11 @@ def get_model(api_key):
     except: return None, None
 
 # ==============================================================================
-# 4. SIDEBAR
+# Sidebar removed: user requested no sidebar UI. Initialize model programmatically
 # ==============================================================================
-with st.sidebar:
-    st.markdown("""
-        <div style="text-align:left; margin-bottom:30px;">
-            <img src="{LOGO_URL}" 
-                 style="filter: brightness(0) invert(1); width: 120px;">
-        </div>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("#### ⚙️ Configuração")
-    key = st.text_input("Chave de API", value=DEFAULT_KEY, type="password", label_visibility="collapsed")
-    
-    model, safety = get_model(key)
-    
-    if model: st.success("● SISTEMA ONLINE")
-    else: st.error("● DESCONECTADO")
-    
-    st.markdown("---")
-    st.markdown("### Performance")
-    c1, c2 = st.columns(2)
-    c1.metric("SLA", "98%")
-    c2.metric("Nota", "4.9")
+# Initialize model using DEFAULT_KEY (no sidebar input). If you want to provide
+# an API key dynamically, set DEFAULT_KEY or update this code to read from env.
+model, safety = get_model(DEFAULT_KEY)
 
 # ==============================================================================
 # 5. CONTEÚDO PRINCIPAL
