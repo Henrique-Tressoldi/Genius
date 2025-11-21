@@ -1,0 +1,10 @@
+id_pedido,itens,valor_total,cliente
+1,Hamburguer + Refri,35.00,João Silva
+2,Hamburguer + Batata Frita,40.00,João Silva
+3,Hamburguer,25.00,João Silva
+4,Hamburguer + Batata Frita + Refri,45.00,Maria Oliveira
+5,Pizza M + Refri,50.00,Maria Oliveira
+6,Pizza M,45.00,Maria Oliveira
+7,Hamburguer + Batata Frita,40.00,Carlos Souza
+8,Sushi Combo,60.00,Ana Costa
+9,Hamburguer + Milkshake,45.00,João Silva

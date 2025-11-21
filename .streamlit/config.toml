@@ -1,0 +1,7 @@
+[theme]
+base = "light"
+primaryColor = "#EA1D2C"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F7F7"
+textColor = "#111827"
+font = "Nunito Sans"
