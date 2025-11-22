@@ -6,6 +6,7 @@ from collections import Counter
 import time
 import os
 import base64
+import streamlit.components.v1 as components
 from google.api_core import exceptions as ga_exceptions
 
 # ==============================================================================
@@ -33,7 +34,7 @@ def load_local_image(path):
 local_logo_data = load_local_image(LOCAL_HEADER_LOGO)
 if local_logo_data: LOGO_URL = local_logo_data
 
-# Favicon
+# Helper de Favicon
 if not os.path.exists(ROUND_ICON) and os.path.exists(ICON_PATH):
     try:
         from PIL import Image, ImageDraw
@@ -50,7 +51,7 @@ page_icon = ROUND_ICON if os.path.exists(ROUND_ICON) else (ICON_PATH if os.path.
 
 st.set_page_config(page_title="iFood Partner Portal", page_icon=page_icon, layout="wide", initial_sidebar_state="collapsed")
 
-# --- CSS: VISUAL IFOOD PURO ---
+# --- CSS: VISUAL IFOOD + FIX MOBILE ---
 def carregar_css():
     return f"""
     <style>
@@ -58,17 +59,42 @@ def carregar_css():
         * {{ font-family: 'Nunito Sans', sans-serif !important; }}
         [data-testid="stAppViewContainer"] {{ background-color: #F7F7F7 !important; }}
         
+        /* --- FIX CRÍTICO PARA ABAS (CARROSSEL CENTRALIZADO) --- */
+        div[data-baseweb="tab-list"] {{
+            display: flex !important;
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            white-space: nowrap !important;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none; /* Firefox */
+            padding: 0 5px 5px 5px;
+            align-items: center;
+            scroll-behavior: smooth; /* Garante rolagem nativa suave */
+        }}
+        div[data-baseweb="tab-list"]::-webkit-scrollbar {{ display: none; }}
+        
+        /* Garante que as abas tenham tamanho fixo para o scroll funcionar bem */
+        div[data-baseweb="tab-list"] button {{
+            flex: 0 0 auto !important;
+            min-width: 140px !important; /* Largura mínima para ficar clicável */
+            margin-right: 5px !important;
+        }}
+
+        /* Selectbox e Inputs */
         div[data-baseweb="select"] > div {{ background-color: #FFFFFF !important; color: #000000 !important; border-radius: 12px !important; }}
         .stTextInput > div > div > input {{ background-color: #ffffff !important; color: #0f172a !important; border: 1px solid #E6E6E6 !important; padding: 12px 14px !important; border-radius: 12px !important; }}
 
+        /* Cards Profissionais */
         .css-card {{ background-color: #FFFFFF !important; border-radius: 16px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #F0F0F0; margin-bottom: 15px; }}
         .metric-box {{ background: #FFF; padding: 20px; border-radius: 12px; border: 1px solid #E0E0E0; text-align: center; }}
         
+        /* Tags de Urgência */
         .status-tag {{ padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }}
         .tag-URGENTE {{ background: #EA1D2C; color: #FFFFFF !important; box-shadow: 0 4px 10px rgba(234, 29, 44, 0.2); }}
         .tag-MEDIA {{ background: #FEF3C7; color: #D97706 !important; }}
         .tag-BAIXA {{ background: #D1FAE5; color: #059669 !important; }}
 
+        /* --- BOTÕES IFOOD --- */
         .stButton button {{
             background-color: #EA1D2C !important;
             color: white !important;
@@ -85,13 +111,13 @@ def carregar_css():
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(234, 29, 44, 0.3) !important;
         }}
-        .stButton button:active, .stButton button:focus {{
+        .stButton button:active {{
             background-color: #A3151F !important;
-            color: white !important;
-            border: none !important;
+            transform: translateY(1px);
             box-shadow: none !important;
         }}
 
+        /* Header */
         header[data-testid="stHeader"], footer {{ display: none !important; }}
         .top-app-header {{ position: fixed; top: 0; left: 0; width: 100%; height: 80px; background-color: #FFFFFF; border-bottom: 1px solid #E6E6E6; display: flex; align-items: center; justify-content: space-between; padding: 0 30px 0 370px; z-index: 999999; }}
         .main .block-container {{ padding-top: 120px !important; padding-left: 3rem !important; padding-right: 3rem !important; max-width: 100%; }}
@@ -156,7 +182,7 @@ def render_phone(item, msg):
     </div>"""
 
 # ==============================================================================
-# 3. FRAGMENTOS (UI MODULARIZADA)
+# 3. FRAGMENTOS
 # ==============================================================================
 
 @st.fragment
@@ -188,12 +214,10 @@ def render_support_tab():
                 
                 res_raw = _safe_generate(prompt)
                 
-                # TRATAMENTO DE ERRO DE API (OFFLINE)
                 if "Offline" in res_raw or "Erro" in res_raw:
-                    st.warning("⚠️ IA Offline ou Erro de Conexão. Verifique sua API Key.")
+                    st.warning("⚠️ IA Offline.")
                     continue
 
-                # Parsing Robusto
                 parts = res_raw.split('|')
                 if len(parts) >= 3:
                     tag_txt = parts[0].strip()
@@ -207,7 +231,6 @@ def render_support_tab():
                 cls = "tag-URGENTE" if "URGENTE" in tag_txt.upper() else ("tag-MEDIA" if "MEDIA" in tag_txt.upper() else "tag-BAIXA")
                 border_color = "#EA1D2C" if "URGENTE" in tag_txt.upper() else "#EEE"
                 
-                # HTML Compactado para evitar quebra de renderização
                 html_content = f"""
                 <div class="css-card" style="padding:20px; border-left: 5px solid {border_color}; position:relative;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
@@ -287,6 +310,7 @@ def render_chat_tab():
         
         if 'chat_history' not in st.session_state: st.session_state['chat_history'] = []
 
+        # --- CORREÇÃO DE LAG: IMUTABILIDADE ---
         def on_submission():
             txt = st.session_state.get("chat_input_w")
             if txt:
@@ -324,7 +348,7 @@ def render_chat_tab():
         st.button("🍔 Top Produto?", on_click=click_suggestion, args=("Produto mais vendido?",))
 
 # ==============================================================================
-# 4. ORQUESTRAÇÃO
+# 4. ORQUESTRAÇÃO & SCRIPT JS (MATH CENTERED SCROLL)
 # ==============================================================================
 st.write("") 
 tab_sup, tab_vend, tab_crm, tab_chat = st.tabs(["🛡️ Central de Suporte", "💰 Engenharia de Vendas", "🎯 CRM Preditivo", "🤖 Genius Assistant"])
@@ -333,3 +357,36 @@ with tab_sup: render_support_tab()
 with tab_vend: render_sales_tab()
 with tab_crm: render_crm_tab()
 with tab_chat: render_chat_tab()
+
+# --- JAVASCRIPT: CÁLCULO MATEMÁTICO PARA CENTRALIZAÇÃO ---
+# Calcula o scrollLeft necessário para colocar o elemento no centro exato
+components.html("""
+<script>
+    function centerActiveTab() {
+        try {
+            const tabList = window.parent.document.querySelector('[data-baseweb="tab-list"]');
+            if (!tabList) return;
+
+            const activeTab = tabList.querySelector('[aria-selected="true"]');
+            if (!activeTab) return;
+
+            // CÁLCULO DO CENTRO:
+            // Posição do elemento - Metade do container + Metade do elemento
+            const scrollValue = activeTab.offsetLeft - (tabList.clientWidth / 2) + (activeTab.clientWidth / 2);
+            
+            tabList.scrollTo({
+                left: scrollValue,
+                behavior: 'smooth'
+            });
+        } catch(e) { console.log(e); }
+    }
+
+    // Executa e Observa
+    centerActiveTab();
+    const observer = new MutationObserver(centerActiveTab);
+    const targetNode = window.parent.document.querySelector('[data-baseweb="tab-list"]');
+    if(targetNode) {
+        observer.observe(targetNode, { attributes: true, subtree: true, attributeFilter: ['aria-selected'] });
+    }
+</script>
+""", height=0, width=0)
