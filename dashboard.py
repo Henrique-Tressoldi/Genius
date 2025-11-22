@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
@@ -7,564 +6,387 @@ from collections import Counter
 import time
 import os
 import base64
-import datetime
-import uuid
+import streamlit.components.v1 as components
 from google.api_core import exceptions as ga_exceptions
-import logging
 
 # ==============================================================================
-# 1. CONFIGURAÇÃO E ESTILOS (Separado para não quebrar)
+# 1. SETUP & INFRAESTRUTURA
 # ==============================================================================
+try: DEFAULT_KEY = st.secrets["GEMINI_KEY"]
+except: DEFAULT_KEY = ""
+
+# Configuração de Imagens
 LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Ifood_logo.svg/2560px-Ifood_logo.svg.png"
-
-# Tenta carregar imagem local `ifood_Logo.png` e embuti-la como data URI (garante exibição)
 LOCAL_HEADER_LOGO = "ifood_Logo.png"
-if os.path.exists(LOCAL_HEADER_LOGO):
-    try:
-        with open(LOCAL_HEADER_LOGO, "rb") as f:
-            encoded = base64.b64encode(f.read()).decode("utf-8")
-            # assume PNG or try to detect from filename
-            mime = "image/png"
-            if LOCAL_HEADER_LOGO.lower().endswith(".jpg") or LOCAL_HEADER_LOGO.lower().endswith(".jpeg"):
-                mime = "image/jpeg"
-            LOGO_URL = f"data:{mime};base64,{encoded}"
-    except Exception:
-        pass
-
-# Ícone local (prefere versão arredondada `ifoo_logo_round.png` se existir)
 ICON_PATH = "ifood_icon.jpg"
 ROUND_ICON = "ifood_icon_round.png"
 
-# Tenta gerar ícone arredondado em tempo de execução se Pillow estiver disponível.
-def _try_generate_round_icon(src, out):
+def load_local_image(path):
+    if os.path.exists(path):
+        try:
+            with open(path, "rb") as f:
+                encoded = base64.b64encode(f.read()).decode("utf-8")
+                mime = "image/jpeg" if path.lower().endswith(('.jpg', '.jpeg')) else "image/png"
+                return f"data:{mime};base64,{encoded}"
+        except: pass
+    return None
+
+local_logo_data = load_local_image(LOCAL_HEADER_LOGO)
+if local_logo_data: LOGO_URL = local_logo_data
+
+# Helper de Favicon
+if not os.path.exists(ROUND_ICON) and os.path.exists(ICON_PATH):
     try:
         from PIL import Image, ImageDraw
-    except Exception:
-        return False
-    try:
-        if not os.path.exists(out) and os.path.exists(src):
-            img = Image.open(src).convert("RGBA")
-            w, h = img.size
-            side = min(w, h)
-            left = (w - side) // 2
-            top = (h - side) // 2
-            img = img.crop((left, top, left + side, top + side)).resize((256, 256), Image.LANCZOS)
-            mask = Image.new("L", (256, 256), 0)
-            draw = ImageDraw.Draw(mask)
-            draw.ellipse((0, 0, 256, 256), fill=255)
-            img.putalpha(mask)
-            img.save(out, format="PNG")
-            return True
-    except Exception:
-        return False
-    return False
+        img = Image.open(ICON_PATH).convert("RGBA")
+        s = min(img.size)
+        img = img.crop(((img.width-s)//2, (img.height-s)//2, (img.width+s)//2, (img.height+s)//2)).resize((256, 256), Image.LANCZOS)
+        mask = Image.new("L", (256, 256), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, 256, 256), fill=255)
+        img.putalpha(mask)
+        img.save(ROUND_ICON, format="PNG")
+    except: pass
 
-# Tenta criar o ícone arredondado (não gera erro se falhar)
-# Tenta gerar o ícone arredondado (se Pillow estiver disponível)
-_try_generate_round_icon(ICON_PATH, ROUND_ICON)
+page_icon = ROUND_ICON if os.path.exists(ROUND_ICON) else (ICON_PATH if os.path.exists(ICON_PATH) else "🔴")
 
-# Use o ícone local preferencialmente: versão arredondada se existir, senão
-# a imagem original `ifood_icon.jpg`. Só em último caso use `LOGO_URL`.
-if os.path.exists(ROUND_ICON):
-    page_icon = ROUND_ICON
-elif os.path.exists(ICON_PATH):
-    page_icon = ICON_PATH
-else:
-    page_icon = LOGO_URL if LOGO_URL else "🔴"
+st.set_page_config(page_title="iFood Partner Portal", page_icon=page_icon, layout="wide", initial_sidebar_state="collapsed")
 
-st.set_page_config(
-    page_title="iFood Partner Portal",
-    page_icon=page_icon,
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Função de rerun compatível com várias versões do Streamlit
-def _safe_rerun():
-    try:
-        # Método público (padrão)
-        st.experimental_rerun()
-        return
-    except Exception:
-        pass
-    # Tentativas com exceções internas de diferentes versões
-    try:
-        from streamlit.runtime.scriptrunner.script_runner import RerunException
-        raise RerunException()
-    except Exception:
-        pass
-    try:
-        from streamlit.web.server.server import RerunException
-        raise RerunException()
-    except Exception:
-        pass
-    try:
-        # Último recurso: reinicia o processo (força reload)
-        import sys
-        sys.exit(0)
-    except Exception:
-        return
-
+# --- CSS: VISUAL IFOOD + FIX MOBILE ---
 def carregar_css():
     return f"""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&display=swap');
         * {{ font-family: 'Nunito Sans', sans-serif !important; }}
-        
-        /* Layout Geral */
         [data-testid="stAppViewContainer"] {{ background-color: #F7F7F7 !important; }}
-        .main .block-container {{ padding-top: 120px !important; padding-left: 3rem !important; padding-right: 3rem !important; max-width: 100%; }}
         
-        /* Texto Geral */
-        /*p, h1, h2, h3, h4, div, label, li {{ color: #1F2937 !important; }}*/
-
-        /* --- CORREÇÃO DROPDOWN (Menu Preto no Branco) --- */
-        div[data-baseweb="select"] > div {{ background-color: #FFFFFF !important; color: #000000 !important; }}
-        div[data-baseweb="select"] span {{ color: #000000 !important; }}
-        ul[data-baseweb="menu"] {{ background-color: #FFFFFF !important; }}
-        li[data-baseweb="option"] {{ color: #000000 !important; }}
-        li[data-baseweb="option"]:hover {{ background-color: #FEE2E2 !important; color: #EA1D2C !important; font-weight: bold !important; }}
-        /* --- SELECTBOX / LISTAS: garantir fundo branco e texto legível --- */
-        /* Regras amplas para cobrir overlays e portais do BaseWeb/React */
-        div[data-testid="stSelectbox"], div[data-testid="stSelectbox"] div, div[role="listbox"], div[role="option"], select, option,
-        body div[role="listbox"], body ul[data-baseweb="menu"], body li[data-baseweb="option"],
-        .rc-virtual-list, .rc-virtual-list-holder, .baseweb-select-menu, .baseweb-select-option {{
-            background-color: #FFFFFF !important;
-            color: #000000 !important;
+        /* --- FIX CRÍTICO PARA ABAS (CARROSSEL CENTRALIZADO) --- */
+        div[data-baseweb="tab-list"] {{
+            display: flex !important;
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            white-space: nowrap !important;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none; /* Firefox */
+            padding: 0 5px 5px 5px;
+            align-items: center;
+            scroll-behavior: smooth; /* Garante rolagem nativa suave */
         }}
-        div[role="option"]:hover, li[data-baseweb="option"]:hover, .baseweb-select-option:hover {{ background-color: #F3F4F6 !important; color: #000000 !important; }}
-        /* Força contraste do item selecionado dentro do input do select */
-        div[data-testid="stSelectbox"] > div, div[data-baseweb="select"] > div {{ background-color: #FFFFFF !important; color: #000000 !important; }}
+        div[data-baseweb="tab-list"]::-webkit-scrollbar {{ display: none; }}
         
-        /* Sidebar: do not force a red background on Streamlit sidebar in deployed app */
-        /* Keep default Streamlit sidebar styling to avoid breaking the hosted layout. */
+        /* Garante que as abas tenham tamanho fixo para o scroll funcionar bem */
+        div[data-baseweb="tab-list"] button {{
+            flex: 0 0 auto !important;
+            min-width: 140px !important; /* Largura mínima para ficar clicável */
+            margin-right: 5px !important;
+        }}
 
-        /* --- COMPONENTES VISUAIS --- */
-        .css-card {{ background-color: #FFFFFF !important; border-radius: 16px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); border: 1px solid #EEE; margin-bottom: 20px; }}
+        /* Selectbox e Inputs */
+        div[data-baseweb="select"] > div {{ background-color: #FFFFFF !important; color: #000000 !important; border-radius: 12px !important; }}
+        .stTextInput > div > div > input {{ background-color: #ffffff !important; color: #0f172a !important; border: 1px solid #E6E6E6 !important; padding: 12px 14px !important; border-radius: 12px !important; }}
+
+        /* Cards Profissionais */
+        .css-card {{ background-color: #FFFFFF !important; border-radius: 16px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #F0F0F0; margin-bottom: 15px; }}
         .metric-box {{ background: #FFF; padding: 20px; border-radius: 12px; border: 1px solid #E0E0E0; text-align: center; }}
-        .ai-result-box {{ background-color: #F0FDF4 !important; border: 1px solid #BBF7D0 !important; border-radius: 12px; padding: 20px; margin-top: 15px; color: #14532D !important; }}
-        .ai-result-box strong {{ color: #14532D !important; }}
         
-        /* Botões e Tags */
-        .stButton button {{ background-color: #EA1D2C !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 700 !important; }}
-        .stButton button:hover {{ transform: translateY(-2px); box-shadow: 0 4px 12px rgba(234, 29, 44, 0.3); }}
-        .status-tag {{ padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 800; text-transform: uppercase; }}
-        .tag-URGENTE {{ background: #FEE2E2; color: #DC2626 !important; }}
+        /* Tags de Urgência */
+        .status-tag {{ padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }}
+        .tag-URGENTE {{ background: #EA1D2C; color: #FFFFFF !important; box-shadow: 0 4px 10px rgba(234, 29, 44, 0.2); }}
         .tag-MEDIA {{ background: #FEF3C7; color: #D97706 !important; }}
         .tag-BAIXA {{ background: #D1FAE5; color: #059669 !important; }}
 
-        /* Esconde elementos padrão */
-        header[data-testid="stHeader"] {{ display: none; }}
-        #MainMenu {{ visibility: hidden; }}
-        footer {{ visibility: hidden; }}
-        /* Style específico para inputs do app (inclui o campo do chat) */
-        /* Alvo amplo: inputs de texto gerados pelo Streamlit e textareas */
-        .stTextInput > div > div > input,
-        input[type="text"],
-        textarea,
-        input[aria-label="Pergunte ao Genius Assistant"],
-        input[aria-label="Digite sua pergunta:"]
-        {{
-            background-color: #ffffff !important;
-            color: #0f172a !important;
-            border: 1px solid #E6E6E6 !important;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06) !important;
-            padding: 12px 14px !important;
-            border-radius: 12px !important;
-        }}
-        .stTextInput > div > div > input::placeholder,
-        input::placeholder,
-        textarea::placeholder {{ color: #9CA3AF !important; }}
-        /* Header custom (usar classe para facilitar overrides responsivos) */
-        .top-app-header {{
-            position: fixed;
-            top: 0;
-            left: 0;
+        /* --- BOTÕES IFOOD --- */
+        .stButton button {{
+            background-color: #EA1D2C !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 8px !important;
+            font-weight: 700 !important;
             width: 100%;
-            height: 80px;
-            background-color: #FFFFFF;
-            border-bottom: 1px solid #E6E6E6;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 30px 0 370px;
-            z-index: 9999;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.03);
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }}
+        .stButton button:hover {{
+            background-color: #C21925 !important;
+            color: white !important;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(234, 29, 44, 0.3) !important;
+        }}
+        .stButton button:active {{
+            background-color: #A3151F !important;
+            transform: translateY(1px);
+            box-shadow: none !important;
         }}
 
-        /* Ajustes responsivos */
-        @media (max-width: 1000px) {{
-            .top-app-header {{ padding: 0 20px !important; height: 72px !important; }}
-            .main .block-container {{ padding-top: 110px !important; padding-left: 1.5rem !important; padding-right: 1.5rem !important; }}
-            /* keep default sidebar width on small screens */
-        }}
-
-        @media (max-width: 700px) {{
-            .top-app-header {{
-                flex-direction: column !important;
-                align-items: flex-start !important;
-                gap: 8px !important;
-                padding: 12px !important;
-                height: auto !important;
-            }}
-            .top-app-header .header-left {{ display:flex; align-items:center; gap:10px; }}
-            .top-app-header .header-right {{ display:flex; align-items:center; gap:12px; width:100%; justify-content:space-between; }}
-            .main .block-container {{ padding-top: 160px !important; padding-left: 12px !important; padding-right: 12px !important; }}
-            /* leave sidebar positioning to Streamlit default on very small screens */
-            .css-card {{ padding: 16px !important; }}
-            .metric-box {{ padding: 14px !important; }}
+        /* Header */
+        header[data-testid="stHeader"], footer {{ display: none !important; }}
+        .top-app-header {{ position: fixed; top: 0; left: 0; width: 100%; height: 80px; background-color: #FFFFFF; border-bottom: 1px solid #E6E6E6; display: flex; align-items: center; justify-content: space-between; padding: 0 30px 0 370px; z-index: 999999; }}
+        .main .block-container {{ padding-top: 120px !important; padding-left: 3rem !important; padding-right: 3rem !important; max-width: 100%; }}
+        
+        @media (max-width: 800px) {{
+            .top-app-header {{ height: 70px !important; padding: 0 15px !important; flex-direction: row !important; gap: 10px !important; }}
+            .header-left img {{ width: 40px !important; height: 40px !important; }}
+            .header-right .loja-info {{ display: none; }}
+            .main .block-container {{ padding-top: 140px !important; padding-left: 1rem !important; padding-right: 1rem !important; }}
         }}
     </style>
-
     <div class="top-app-header">
-        <div class="header-left" style="display:flex; align-items:center; gap:15px;">
-                <img src="{LOGO_URL}" style="width:108px; height:108px; border-radius:14px; object-fit:cover;" alt="iFood logo"/>
-                <span style="color:#ccc; font-size:1.2rem;">|</span>
-                <span style="font-size:1.1rem; font-weight:600; color:#555;">Portal do Parceiro</span>
+        <div class="header-left" style="display:flex; align-items:center; gap:12px;">
+            <img src="{LOGO_URL}" style="width:48px; height:48px; border-radius:10px; object-fit:cover;"/>
+            <span style="font-size:1.1rem; font-weight:700; color:#333;">Portal Parceiro</span>
+        </div>
+        <div class="header-right" style="display:flex; align-items:center; gap:15px;">
+            <div class="loja-info" style="text-align:right; line-height:1.2;">
+                <div style="font-size:14px; font-weight:700; color:#333;">Minha Loja</div>
+                <div style="font-size:11px; color:#00A85A; font-weight:700;">● ABERTA</div>
             </div>
-        <div class="header-right" style="display:flex; align-items:center; gap:20px;">
-            <div style="text-align:right; line-height:1.2;">
-                <div style="font-size:15px; font-weight:700; color:#333;">Minha Loja</div>
-                <div style="font-size:12px; color:#00A85A; font-weight:700;">● LOJA ABERTA</div>
-            </div>
-            <div style="width:45px; height:45px; background:#EA1D2C; border-radius:50%; color:white; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:1.2rem;">L</div>
+            <div style="width:40px; height:40px; background:#EA1D2C; border-radius:50%; color:white; display:flex; align-items:center; justify-content:center; font-weight:bold;">L</div>
         </div>
     </div>
     """
-
 st.markdown(carregar_css(), unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. FUNÇÕES AUXILIARES (HTML DO CELULAR SEPARADO)
+# 2. IA CONFIG
 # ==============================================================================
-def render_phone_mockup(item, msg):
-    return f"""
-    <div style="border: 14px solid #222; border-radius: 36px; background: #fff; max-width: 300px; margin:0 auto; box-shadow: 0 30px 60px rgba(0,0,0,0.3); overflow:hidden;">
-        <div style="background:#F5F5F5; height:30px; text-align:center; font-size:10px; padding-top:8px; font-weight:bold; color:#333;">12:42</div>
-        <div style="padding:20px; height:450px; background: linear-gradient(135deg, #EA1D2C 0%, #C20E1B 100%);">
-            <div style="background: rgba(255,255,255,0.95); border-radius: 12px; padding: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.08); margin-top: 30px; border-left: 5px solid #EA1D2C; font-family: sans-serif;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                    <span style="font-size:10px; font-weight:bold; color:#333 !important;">IFOOD • AGORA</span>
-                    <span style="font-size:10px; color:#666 !important;">1m</span>
-                </div>
-                <div style="font-size:12px; font-weight:800; color:#000 !important; margin-bottom:3px;">{item} PRA VOCÊ! 😋</div>
-                <div style="font-size:11px; color:#444 !important; line-height:1.3;">{msg}</div>
-            </div>
-        </div>
-    </div>
-    """
-
-# ==============================================================================
-# 3. BACKEND (IA E LÓGICA)
-# ==============================================================================
-# Tenta pegar dos segredos do Streamlit, ou usa vazio se não achar
-try:
-    DEFAULT_KEY = st.secrets["GEMINI_KEY"]
-except:
-    DEFAULT_KEY = ""
-
 @st.cache_resource
 def get_model(api_key):
     if not api_key: return None, None
     try:
         genai.configure(api_key=api_key)
-        safety = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-        }
+        safety = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE}
         for m in genai.list_models():
-            if 'flash' in m.name.lower() and 'exp' not in m.name.lower():
-                return genai.GenerativeModel(m.name), safety
+            if 'flash' in m.name.lower(): return genai.GenerativeModel(m.name), safety
         return genai.GenerativeModel('gemini-1.5-pro'), safety
     except: return None, None
 
-# Helper to call the model with guarded error handling (avoids crash on quota/errors)
-def _safe_generate(prompt_text: str):
-    if not model:
-        return "Offline: modelo indisponível."
-    try:
-        with st.spinner('Analisando...'):
-            return model.generate_content(prompt_text, safety_settings=safety).text.strip()
-    except ga_exceptions.ResourceExhausted:
-        logging.exception('ResourceExhausted from generative API')
-        return "Erro: recurso ou cota esgotada. Tente novamente mais tarde ou verifique limites na conta." 
-    except Exception as e:
-        logging.exception('Erro ao chamar a API generativa')
-        return f"Erro na geração da IA: {str(e)}"
-
-# ==============================================================================
-# Sidebar removed: user requested no sidebar UI. Initialize model programmatically
-# ==============================================================================
-# Initialize model using DEFAULT_KEY (no sidebar input). If you want to provide
-# an API key dynamically, set DEFAULT_KEY or update this code to read from env.
 model, safety = get_model(DEFAULT_KEY)
 
-# ==============================================================================
-# 5. CONTEÚDO PRINCIPAL
-# ==============================================================================
-st.write("") # Espaço para o header fixo
+def _safe_generate(prompt):
+    if not model: return "Offline."
+    try: return model.generate_content(prompt, safety_settings=safety).text.strip()
+    except: return "Erro na IA."
 
-tab_sup, tab_vend, tab_crm, tab_chat = st.tabs(["🛡️ Central de Suporte", "💰 Engenharia de Vendas", "🎯 CRM Preditivo", "🤖 Genius Assistant"])
+def render_phone(item, msg):
+    return f"""
+    <div style="border:12px solid #222; border-radius:30px; background:#fff; max-width:280px; margin:0 auto; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow:hidden;">
+        <div style="background:#EA1D2C; height:380px; padding:20px; display:flex; flex-direction:column; justify-content:center;">
+            <div style="background:#fff; border-radius:12px; padding:16px; width:100%; box-shadow:0 4px 15px rgba(0,0,0,0.15);">
+                <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+                    <span style="font-size:10px; font-weight:800; color:#444;">IFOOD • AGORA</span>
+                    <span style="font-size:10px; color:#999;">1m</span>
+                </div>
+                <div style="font-size:13px; font-weight:800; color:#111; margin-bottom:4px;">{item} 😋</div>
+                <div style="font-size:12px; color:#555; line-height:1.4;">{msg}</div>
+            </div>
+        </div>
+    </div>"""
 
-# --- ABA SUPORTE ---
-with tab_sup:
+# ==============================================================================
+# 3. FRAGMENTOS
+# ==============================================================================
+
+@st.fragment
+def render_support_tab():
+    count = 0
     if os.path.exists('suporte_ifood_simulado.csv'):
         df = pd.read_csv('suporte_ifood_simulado.csv')
         count = len(df)
-    else: count = 0
     
     st.write("")
-    col_l, col_r = st.columns([1, 2.5])
-    with col_l:
-        st.markdown(f"""<div class="css-card" style="border-left:8px solid #EA1D2C;">
-            <h5 style="color:#666; margin:0;">FILA DE ATENDIMENTO</h5>
-            <h1 style="margin:10px 0; font-size:4rem; color:#333;">{count}</h1>
-            <strong style="color:#EA1D2C;">Tickets Pendentes</strong></div>""", unsafe_allow_html=True)
-        if st.button("⚡ INICIAR TRIAGEM AUTOMÁTICA"):
-            st.session_state['processed'] = True
+    c1, c2 = st.columns([1, 2.5])
+    with c1:
+        st.markdown(f"""<div class="css-card" style="border-left:8px solid #EA1D2C; padding:30px;">
+            <div style="color:#666; font-weight:700; letter-spacing:1px;">FILA DE ATENDIMENTO</div>
+            <div style="font-size:4rem; font-weight:900; color:#333; line-height:1.1;">{count}</div>
+            <div style="color:#EA1D2C; font-weight:bold;">Tickets Pendentes</div></div>""", unsafe_allow_html=True)
+        if st.button("⚡ TRIAGEM AUTOMÁTICA"): st.session_state['processed'] = True
 
-    with col_r:
+    with c2:
         if st.session_state.get('processed') and count > 0:
-            st.markdown("##### 📋 Análise em Tempo Real")
+            st.markdown("##### 📋 Análise de Risco & Churn")
             for i, row in df.head(3).iterrows():
                 msg = row['mensagem_cliente']
-                prompt = f"Classifique (URGENTE/MEDIA/BAIXA) e justifique em 1 frase: '{msg}'"
-                res = _safe_generate(prompt)
+                prompt = f"""Analise este ticket do iFood: '{msg}'. 
+                1. Classifique: URGENTE, MEDIA ou BAIXA.
+                2. Dê uma ação prática curta para evitar o CHURN (perda do cliente).
+                3. Escreva uma resposta curta e empática para o cliente.
+                Responda estritamente no formato: CLASSIFICACAO | ACAO ANTI-CHURN | RESPOSTA AO CLIENTE"""
                 
-                tag, cls = ("BAIXA", "tag-BAIXA")
-                if "URGENTE" in res.upper(): tag, cls = "URGENTE", "tag-URGENTE"
-                elif "MEDIA" in res.upper(): tag, cls = "MÉDIA", "tag-MEDIA"
+                res_raw = _safe_generate(prompt)
                 
-                st.markdown(f"""<div class="css-card" style="padding:20px; margin-bottom:15px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span style="color:#EA1D2C; font-weight:800;">CHAMADO #{i+1}</span>
-                        <span class="status-tag {cls}">{tag}</span>
-                    </div>
-                    <div style="margin:12px 0; font-weight:600; font-size:1.1rem; color:#333;">"{msg}"</div>
-                    <div style="background:#F5F5F5; padding:10px; border-radius:8px; font-size:0.9rem; color:#555;">
-                        🤖 <strong>Genius:</strong> {res}
-                    </div>
-                </div>""", unsafe_allow_html=True)
-                time.sleep(0.1)
+                if "Offline" in res_raw or "Erro" in res_raw:
+                    st.warning("⚠️ IA Offline.")
+                    continue
 
-# --- ABA VENDAS ---
-with tab_vend:
+                parts = res_raw.split('|')
+                if len(parts) >= 3:
+                    tag_txt = parts[0].strip()
+                    churn_action = parts[1].strip()
+                    client_response = parts[2].strip()
+                else:
+                    tag_txt = "ANÁLISE"
+                    churn_action = res_raw
+                    client_response = "---"
+
+                cls = "tag-URGENTE" if "URGENTE" in tag_txt.upper() else ("tag-MEDIA" if "MEDIA" in tag_txt.upper() else "tag-BAIXA")
+                border_color = "#EA1D2C" if "URGENTE" in tag_txt.upper() else "#EEE"
+                
+                html_content = f"""
+                <div class="css-card" style="padding:20px; border-left: 5px solid {border_color}; position:relative;">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+                        <span style="font-weight:800; color:#333; font-size:1rem;">Ticket #{i+1}</span>
+                        <span class="status-tag {cls}">{tag_txt}</span>
+                    </div>
+                    <div style="font-style:italic; color:#555; margin-bottom:15px;">"{msg}"</div>
+                    <div style="margin-bottom:10px;">
+                        <strong style="color:#EA1D2C; font-size:0.85rem;">🛡️ AÇÃO ANTI-CHURN:</strong>
+                        <div style="font-size:0.9rem; color:#374151; margin-top:2px;">{churn_action}</div>
+                    </div>
+                    <div style="background:#F0F9FF; padding:12px; border-radius:8px; border:1px solid #E0F2FE;">
+                        <strong style="color:#0284C7; font-size:0.85rem;">💬 SUGESTÃO DE RESPOSTA:</strong>
+                        <div style="font-size:0.9rem; color:#374151; margin-top:2px; font-style:italic;">"{client_response}"</div>
+                    </div>
+                </div>
+                """
+                st.markdown(html_content, unsafe_allow_html=True)
+
+@st.fragment
+def render_sales_tab():
     st.write("")
     if os.path.exists('vendas_restaurante.csv'):
         df_v = pd.read_csv('vendas_restaurante.csv')
-        itens = []
-        for i in df_v['itens']: itens.extend([x.strip() for x in str(i).split('+')])
-        campeao = Counter(itens).most_common(1)[0][0]
-        total_vendas = df_v['valor_total'].sum()
+        itens = [x.strip() for i in df_v['itens'] for x in str(i).split('+')]
+        top = Counter(itens).most_common(1)[0][0] if itens else "N/A"
         
-        # CARTÕES DE MÉTRICA HTML
         c1, c2, c3 = st.columns(3)
-        c1.markdown(f"""<div class="metric-box"><div style="color:#888; font-weight:700; font-size:0.8rem; letter-spacing:1px;">FATURAMENTO</div><div style="color:#333; font-weight:800; font-size:2.2rem; margin:5px 0;">R$ {total_vendas:.2f}</div><div style="color:#00A85A; font-weight:bold; font-size:0.8rem;">▲ +12% vs Ontem</div></div>""", unsafe_allow_html=True)
-        c2.markdown(f"""<div class="metric-box"><div style="color:#888; font-weight:700; font-size:0.8rem; letter-spacing:1px;">TOTAL PEDIDOS</div><div style="color:#333; font-weight:800; font-size:2.2rem; margin:5px 0;">{len(df_v)}</div><div style="color:#666; font-size:0.8rem;">Hoje</div></div>""", unsafe_allow_html=True)
-        c3.markdown(f"""<div class="metric-box"><div style="color:#888; font-weight:700; font-size:0.8rem; letter-spacing:1px;">ITEM CAMPEÃO</div><div style="color:#EA1D2C; font-weight:800; font-size:1.8rem; margin:5px 0;">{campeao.upper()}</div><div style="color:#666; font-size:0.8rem;">Maior Conversão</div></div>""", unsafe_allow_html=True)
+        c1.markdown(f"""<div class="metric-box"><small>FATURAMENTO</small><h3>R$ {df_v['valor_total'].sum():.2f}</h3></div>""", unsafe_allow_html=True)
+        c2.markdown(f"""<div class="metric-box"><small>PEDIDOS</small><h3>{len(df_v)}</h3></div>""", unsafe_allow_html=True)
+        c3.markdown(f"""<div class="metric-box"><small>CAMPEÃO</small><h3 style="color:#EA1D2C;">{top}</h3></div>""", unsafe_allow_html=True)
         
         st.write("")
-        st.write("")
-        
-        c_ia, c_table = st.columns([1, 2])
+        c_ia, c_tb = st.columns([1, 1.5])
         with c_ia:
-            st.markdown(f"""<div class="css-card"><h3 style="color:#EA1D2C; margin-top:0;">Insight Genius 💡</h3><p style="font-size:1rem; line-height:1.5; color:#444;">O item <strong>{campeao}</strong> é responsável por grande parte das vendas. <br><br>A IA sugere criar um combo estratégico.</p></div>""", unsafe_allow_html=True)
-            if st.button("✨ GERAR OFERTA AGORA"):
-                with st.spinner("Analisando..."):
-                    prompt = f"Crie nome de combo e descrição curta para {campeao} + Batata. Sem titulos. Formato texto simples."
+            st.markdown(f"""<div class="css-card"><h4 style="color:#EA1D2C;">🔥 Gerador de Combos</h4><p>Crie 5 estratégias para vender mais <b>{top}</b>.</p></div>""", unsafe_allow_html=True)
+            
+            if st.button("✨ GERAR 5 COMBOS PROMOCIONAIS"):
+                with st.spinner("Criando estratégias..."):
+                    prompt = f"Crie 5 sugestões de COMBOS promocionais diferentes e criativos envolvendo {top}. Formato lista markdown simples."
                     res = _safe_generate(prompt)
-                    if res:
-                        # CORREÇÃO: MOSTRAR RESULTADO EM CAIXA VISÍVEL
-                        st.markdown(f"""<div class="ai-result-box"><strong>✅ Sugestão Gerada:</strong><br><br>{res.replace(chr(10), '<br>')}</div>""", unsafe_allow_html=True)
-                    else: st.error("Tente novamente.")
+                    st.success("Estratégias geradas!")
+                    st.markdown(f"""<div class="css-card" style="background:#FFF5F5 !important;">{res}</div>""", unsafe_allow_html=True)
         
-        with c_table:
-            st.markdown("##### 📋 Últimos Pedidos")
-            st.dataframe(df_v, use_container_width=True, height=500)
+        with c_tb:
+            st.dataframe(df_v, width=None, height=400, use_container_width=True)
 
-# --- ABA CRM ---
-with tab_crm:
+@st.fragment
+def render_crm_tab():
     st.write("")
     if os.path.exists('vendas_restaurante.csv'):
         df_v = pd.read_csv('vendas_restaurante.csv')
         if 'cliente' in df_v.columns:
-            cli = df_v['cliente'].unique()
-            
-            c_l, c_r = st.columns([1.5, 1])
+            c_l, c_r = st.columns([1.2, 1])
             with c_l:
-                st.markdown("### Segmentação Inteligente")
-                # O CSS lá em cima já corrigiu as cores deste Selectbox
-                target = st.selectbox("Selecione o Cliente:", cli)
+                st.markdown("### 🎯 Sniper CRM")
+                st.markdown("Selecione um cliente para enviar uma oferta única e personalizada.")
+                cli = st.selectbox("Base de Clientes:", df_v['cliente'].unique())
+                itens_c = [x.strip() for i in df_v[df_v['cliente']==cli]['itens'] for x in str(i).split('+')]
+                fav = Counter(itens_c).most_common(1)[0][0] if itens_c else "?"
+                st.info(f"Prato favorito: **{fav}**")
                 
-                hist = df_v[df_v['cliente'] == target]
-                itens_c = []
-                for i in hist['itens']: itens_c.extend([x.strip() for x in str(i).split('+')])
-                
-                if itens_c:
-                    fav = Counter(itens_c).most_common(1)[0][0]
-                    st.markdown(f"""<div class="css-card"><div style="display:flex; justify-content:space-between; align-items:center;"><div><small style="color:#999; font-weight:bold;">CLIENTE</small><br><span style="font-size:1.4rem; font-weight:700;">{target}</span></div><div style="text-align:right;"><small style="color:#999; font-weight:bold;">PRATO PREFERIDO</small><br><span style="font-size:1.4rem; font-weight:700; color:#EA1D2C;">{fav.upper()}</span></div></div></div>""", unsafe_allow_html=True)
-                    
-                    if st.button("🚀 ENVIAR PUSH NOTIFICATION"):
-                        prompt = f"Aja como iFood. Cliente: {target}. Favorito: {fav}. Escreva 1 push curta, urgente, emoji. Sem listas. Texto puro."
-                        res = _safe_generate(prompt)
-                        st.session_state['push_msg'] = res
-                        st.session_state['push_item'] = fav
+                if st.button("🚀 DISPARAR OFERTA ÚNICA"):
+                    prompt = f"Aja como iFood. Cliente: {cli}. Favorito: {fav}. Escreva 1 notificação push curta, urgente e irresistível com emoji. Texto puro apenas."
+                    res = _safe_generate(prompt)
+                    st.session_state['crm_push'] = {'msg': res, 'item': fav}
             
             with c_r:
-                msg = st.session_state.get('push_msg', "Aguardando...")
-                item = st.session_state.get('push_item', "OFERTA").upper()
-                # Chama a função que gera o HTML do celular
-                st.markdown(render_phone_mockup(item, msg), unsafe_allow_html=True)
-        else:
-            st.error("Coluna 'cliente' não encontrada no CSV.")
+                push_data = st.session_state.get('crm_push', {'msg': 'Aguardando disparo...', 'item': 'IFOOD'})
+                st.markdown(render_phone(push_data['item'], push_data['msg']), unsafe_allow_html=True)
 
-# --- ABA GENIUS ASSISTANT ---
-with tab_chat:
-    st.write("")
-    # Layout: 2/3 para Chat, 1/3 para Sugestões
+@st.fragment
+def render_chat_tab():
     c_left, c_right = st.columns([2, 1])
-
-    # Função interna para processar a pergunta sem duplicar
-    def processar_pergunta(texto_pergunta):
-        if not texto_pergunta: return
-        
-        # 1. Evita duplicidade: só ignora se já existir um par recente user->assistant
-        hist = st.session_state.get('chat_history', [])
-        if len(hist) >= 2 and hist[-2].get('role') == 'user' and hist[-1].get('role') == 'assistant' and hist[-2].get('text') == texto_pergunta:
-            return
-
-        # 2. Adiciona pergunta ao histórico
-        st.session_state['chat_history'].append({'role': 'user', 'text': texto_pergunta})
-
-        # Debug/tracing: registra início do processamento (visível no UI se ativado)
-        run_id = uuid.uuid4().hex[:8]
-        start_ts = datetime.datetime.utcnow()
-        st.session_state['last_process'] = {
-            'id': run_id,
-            'question': texto_pergunta,
-            'status': 'started',
-            'start': start_ts.isoformat() + 'Z'
-        }
-        
-        # 3. Gera resposta da IA
-        resposta = "Offline"
-        if os.path.exists('vendas_restaurante.csv') and model:
-            try:
-                df = pd.read_csv('vendas_restaurante.csv')
-                # Usa apenas as últimas 50 linhas para economizar tokens e ser rápido
-                ctx = df.tail(50).to_string(index=False)
-                
-                prompt = f"""
-                Atue como um Analista de BI do iFood.
-                Analise os dados recentes de vendas abaixo:
-                {ctx}
-                
-                PERGUNTA DO USUÁRIO: {texto_pergunta}
-                
-                Responda de forma curta, direta (máx 2 frases) e use emojis.
-                """
-                
-                # Chama a IA
-                resposta = _safe_generate(prompt)
-                # Atualiza debug com fim e duração
-                end_ts = datetime.datetime.utcnow()
-                try:
-                    dur = (end_ts - start_ts).total_seconds()
-                except Exception:
-                    dur = None
-                st.session_state['last_process'].update({'status': 'done', 'end': end_ts.isoformat() + 'Z', 'duration_s': dur})
-            except: 
-                resposta = "Erro ao processar IA."
-        
-        # 4. Adiciona resposta ao histórico
-        st.session_state['chat_history'].append({'role': 'assistant', 'text': resposta})
-
     with c_left:
         st.markdown("""<div class="css-card"><h4 style='color:#EA1D2C; margin:0;'>Genius Assistant 💬</h4><p style='font-size:0.9rem; color:#555;'>Pergunte sobre seus dados de vendas.</p></div>""", unsafe_allow_html=True)
-
-        # Inicializa histórico
-        if 'chat_history' not in st.session_state: 
-            st.session_state['chat_history'] = []
-
-        # Debug toggle (mostra último processamento)
-        if 'show_debug' not in st.session_state:
-            st.session_state['show_debug'] = True
-        show_debug = st.checkbox('Mostrar debug de processamento', value=st.session_state['show_debug'], key='show_debug')
-        if show_debug and st.session_state.get('last_process'):
-            lp = st.session_state['last_process']
-            status = lp.get('status')
-            q = lp.get('question')
-            start = lp.get('start')
-            end = lp.get('end', '---')
-            dur = lp.get('duration_s', None)
-            st.markdown(f"""
-                <div style='background:#fff7ed; border:1px solid #ffd8a8; padding:10px; border-radius:8px; margin-bottom:8px;'>
-                    <div style='font-size:0.85rem; color:#92400e; font-weight:700;'>Debug: last process</div>
-                    <div style='font-size:0.85rem; color:#333;'><strong>id:</strong> {lp.get('id')} &nbsp; <strong>status:</strong> {status}</div>
-                    <div style='font-size:0.85rem; color:#333;'><strong>start:</strong> {start} &nbsp; <strong>end:</strong> {end} &nbsp; <strong>dur(s):</strong> {dur}</div>
-                    <div style='font-size:0.85rem; color:#333; margin-top:6px;'><strong>question:</strong> {q}</div>
-                </div>
-            """, unsafe_allow_html=True)
-
-        # --- 1. ÁREA DE INPUT (FIXA NO TOPO) ---
-        with st.form(key='chat_form', clear_on_submit=True):
-            u_input = st.text_input("Digite sua pergunta:", placeholder="Ex: Qual cliente comprou mais?", key="top_chat_input")
-            
-            # Botão de envio dentro do form
-            if st.form_submit_button("Enviar Pergunta"):
-                processar_pergunta(u_input)
-
-        # --- 2. ÁREA DE MENSAGENS (ORDEM INVERSA) ---
-        # Vamos criar pares [Pergunta, Resposta] e mostrar os mais novos primeiro
-        history = st.session_state['chat_history']
         
-        # Agrupa em pares para exibição correta
-        pairs = []
-        buffer = []
-        for msg in history:
-            buffer.append(msg)
-            if len(buffer) == 2: # Temos uma pergunta e uma resposta
-                pairs.append(buffer)
-                buffer = []
-        
-        # Se sobrou uma pergunta sem resposta (processando), adiciona também
-        if buffer: pairs.append(buffer)
-        
-        # Exibe de trás para frente (Newest First)
-        st.write("") # Espaço
-        for pair in reversed(pairs):
-            # Mensagem do Usuário
-            user_msg = pair[0]
-            st.markdown(f"""
-            <div style="text-align:right; margin-bottom:5px;">
-                <span style="background:#F3F4F6; color:#333; padding:10px 15px; border-radius:15px 15px 0 15px; display:inline-block; font-weight:600; font-size:0.9rem;">
-                    {user_msg['text']}
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Resposta da IA (se houver)
-            if len(pair) > 1:
-                ai_msg = pair[1]
-                st.markdown(f"""
-                <div style="text-align:left; margin-bottom:25px;">
-                    <span style="background:#FFF0F0; color:#EA1D2C; border:1px solid #FECACA; padding:10px 15px; border-radius:15px 15px 15px 0; display:inline-block; font-size:0.9rem;">
-                        🤖 <strong>Genius:</strong> {ai_msg['text']}
-                    </span>
-                </div>
-                """, unsafe_allow_html=True)
+        if 'chat_history' not in st.session_state: st.session_state['chat_history'] = []
+
+        # --- CORREÇÃO DE LAG: IMUTABILIDADE ---
+        def on_submission():
+            txt = st.session_state.get("chat_input_w")
+            if txt:
+                st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'user', 'text': txt}]
+                ctx = ""
+                if os.path.exists('vendas_restaurante.csv'): 
+                    ctx = pd.read_csv('vendas_restaurante.csv').tail(30).to_string(index=False)
+                resp = _safe_generate(f"Dados: {ctx}. Pergunta: {txt}. Responda curto e com emojis.")
+                st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'assistant', 'text': resp}]
+                st.session_state.chat_input_w = ""
+
+        def click_suggestion(sugestao):
+            st.session_state.chat_input_w = sugestao 
+            st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'user', 'text': sugestao}]
+            ctx = ""
+            if os.path.exists('vendas_restaurante.csv'): 
+                ctx = pd.read_csv('vendas_restaurante.csv').tail(30).to_string(index=False)
+            resp = _safe_generate(f"Dados: {ctx}. Pergunta: {sugestao}. Responda curto e com emojis.")
+            st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'assistant', 'text': resp}]
+            st.session_state.chat_input_w = ""
+
+        st.text_input("Digite sua pergunta:", key="chat_input_w", on_change=on_submission)
+        st.button("Enviar", on_click=on_submission)
+
+        for msg in reversed(st.session_state['chat_history']):
+            align = "right" if msg['role'] == 'user' else "left"
+            bg = "#F3F4F6" if msg['role'] == 'user' else "#FFF0F0"
+            color = "#333" if msg['role'] == 'user' else "#EA1D2C"
+            st.markdown(f"""<div style="text-align:{align}; margin-bottom:8px;"><span style="background:{bg}; color:{color}; padding:8px 14px; border-radius:12px; display:inline-block; font-size:0.9rem; font-weight:500;">{msg['text']}</span></div>""", unsafe_allow_html=True)
 
     with c_right:
-        st.info("💡 **Sugestões Rápidas:**")
-        
-        # Botões que acionam a pergunta automaticamente
-        if st.button("💰 Faturamento Total?"):
-            processar_pergunta("Qual o faturamento total somando tudo?")
+        st.info("💡 **Sugestões:**")
+        st.button("💰 Faturamento?", on_click=click_suggestion, args=("Faturamento total?",))
+        st.button("🏆 Melhor Cliente?", on_click=click_suggestion, args=("Melhor cliente?",))
+        st.button("🍔 Top Produto?", on_click=click_suggestion, args=("Produto mais vendido?",))
+
+# ==============================================================================
+# 4. ORQUESTRAÇÃO & SCRIPT JS (MATH CENTERED SCROLL)
+# ==============================================================================
+st.write("") 
+tab_sup, tab_vend, tab_crm, tab_chat = st.tabs(["🛡️ Central de Suporte", "💰 Engenharia de Vendas", "🎯 CRM Preditivo", "🤖 Genius Assistant"])
+
+with tab_sup: render_support_tab()
+with tab_vend: render_sales_tab()
+with tab_crm: render_crm_tab()
+with tab_chat: render_chat_tab()
+
+# --- JAVASCRIPT: CÁLCULO MATEMÁTICO PARA CENTRALIZAÇÃO ---
+# Calcula o scrollLeft necessário para colocar o elemento no centro exato
+components.html("""
+<script>
+    function centerActiveTab() {
+        try {
+            const tabList = window.parent.document.querySelector('[data-baseweb="tab-list"]');
+            if (!tabList) return;
+
+            const activeTab = tabList.querySelector('[aria-selected="true"]');
+            if (!activeTab) return;
+
+            // CÁLCULO DO CENTRO:
+            // Posição do elemento - Metade do container + Metade do elemento
+            const scrollValue = activeTab.offsetLeft - (tabList.clientWidth / 2) + (activeTab.clientWidth / 2);
             
-        if st.button("🏆 Melhor Cliente?"):
-            processar_pergunta("Quem é o cliente que mais gastou?")
-            
-        if st.button("🍔 Item mais vendido?"):
-            processar_pergunta("Qual o produto mais vendido?")
+            tabList.scrollTo({
+                left: scrollValue,
+                behavior: 'smooth'
+            });
+        } catch(e) { console.log(e); }
+    }
+
+    // Executa e Observa
+    centerActiveTab();
+    const observer = new MutationObserver(centerActiveTab);
+    const targetNode = window.parent.document.querySelector('[data-baseweb="tab-list"]');
+    if(targetNode) {
+        observer.observe(targetNode, { attributes: true, subtree: true, attributeFilter: ['aria-selected'] });
+    }
+</script>
+""", height=0, width=0)
