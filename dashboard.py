@@ -7,453 +7,283 @@ from collections import Counter
 import time
 import os
 import base64
-import datetime
 import uuid
 from google.api_core import exceptions as ga_exceptions
 import logging
 
 # ==============================================================================
-# 1. CONFIGURAÇÃO E ESTILOS
+# 1. SETUP & INFRAESTRUTURA
 # ==============================================================================
-LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Ifood_logo.svg/2560px-Ifood_logo.svg.png"
+try: DEFAULT_KEY = st.secrets["GEMINI_KEY"]
+except: DEFAULT_KEY = ""
 
-# Tenta carregar imagem local `ifood_Logo.png`
+LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Ifood_logo.svg/2560px-Ifood_logo.svg.png"
 LOCAL_HEADER_LOGO = "ifood_Logo.png"
+ICON_PATH = "ifood_icon.jpg"
+ROUND_ICON = "ifood_icon_round.png"
+
+# Carregamento de assets
 if os.path.exists(LOCAL_HEADER_LOGO):
     try:
         with open(LOCAL_HEADER_LOGO, "rb") as f:
             encoded = base64.b64encode(f.read()).decode("utf-8")
             mime = "image/png"
-            if LOCAL_HEADER_LOGO.lower().endswith(".jpg") or LOCAL_HEADER_LOGO.lower().endswith(".jpeg"):
-                mime = "image/jpeg"
+            if LOCAL_HEADER_LOGO.lower().endswith(".jpg"): mime = "image/jpeg"
             LOGO_URL = f"data:{mime};base64,{encoded}"
-    except Exception:
-        pass
+    except Exception: pass
 
-# Ícone local
-ICON_PATH = "ifood_icon.jpg"
-ROUND_ICON = "ifood_icon_round.png"
-
-# Função auxiliar para ícone redondo
 def _try_generate_round_icon(src, out):
     try:
         from PIL import Image, ImageDraw
         if not os.path.exists(out) and os.path.exists(src):
             img = Image.open(src).convert("RGBA")
-            w, h = img.size
-            side = min(w, h)
-            left = (w - side) // 2
-            top = (h - side) // 2
-            img = img.crop((left, top, left + side, top + side)).resize((256, 256), Image.LANCZOS)
+            s = min(img.size)
+            img = img.crop(((img.width-s)//2, (img.height-s)//2, (img.width+s)//2, (img.height+s)//2)).resize((256, 256), Image.LANCZOS)
             mask = Image.new("L", (256, 256), 0)
-            draw = ImageDraw.Draw(mask)
-            draw.ellipse((0, 0, 256, 256), fill=255)
+            ImageDraw.Draw(mask).ellipse((0, 0, 256, 256), fill=255)
             img.putalpha(mask)
             img.save(out, format="PNG")
-            return True
-    except Exception:
-        return False
-    return False
+    except: pass
 
 _try_generate_round_icon(ICON_PATH, ROUND_ICON)
-
-if os.path.exists(ROUND_ICON):
-    page_icon = ROUND_ICON
-elif os.path.exists(ICON_PATH):
-    page_icon = ICON_PATH
-else:
-    page_icon = LOGO_URL if LOGO_URL else "🔴"
+page_icon = ROUND_ICON if os.path.exists(ROUND_ICON) else (ICON_PATH if os.path.exists(ICON_PATH) else "🔴")
 
 st.set_page_config(
     page_title="iFood Partner Portal",
     page_icon=page_icon,
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# --- FUNÇÃO DE RERUN ROBUSTA (Para atualizar o chat) ---
-def _safe_rerun():
-    if hasattr(st, "rerun"):
-        st.rerun()
-        return
-    if hasattr(st, "experimental_rerun"):
-        st.experimental_rerun()
-        return
-    try:
-        from streamlit.runtime.scriptrunner.script_runner import RerunException
-        raise RerunException(st.runtime.scriptrunner.script_runner.RerunData())
-    except Exception:
-        pass
-
-# --- CSS COMPLETO (RESTAURADO + CORREÇÃO MOBILE) ---
+# --- CSS: LAYOUT E RESPONSIVIDADE ---
 def carregar_css():
     return f"""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&display=swap');
         * {{ font-family: 'Nunito Sans', sans-serif !important; }}
         
-        /* Layout Geral */
         [data-testid="stAppViewContainer"] {{ background-color: #F7F7F7 !important; }}
         
-        /* --- CORREÇÃO DROPDOWN (Menu Preto no Branco) - ORIGINAL MANTIDO --- */
+        /* UI Overrides */
         div[data-baseweb="select"] > div {{ background-color: #FFFFFF !important; color: #000000 !important; }}
-        div[data-baseweb="select"] span {{ color: #000000 !important; }}
-        ul[data-baseweb="menu"] {{ background-color: #FFFFFF !important; }}
-        li[data-baseweb="option"] {{ color: #000000 !important; }}
-        li[data-baseweb="option"]:hover {{ background-color: #FEE2E2 !important; color: #EA1D2C !important; font-weight: bold !important; }}
-        
-        div[data-testid="stSelectbox"], div[data-testid="stSelectbox"] div, div[role="listbox"], div[role="option"], select, option {{
-            background-color: #FFFFFF !important;
-            color: #000000 !important;
-        }}
-        
-        /* --- COMPONENTES VISUAIS --- */
         .css-card {{ background-color: #FFFFFF !important; border-radius: 16px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); border: 1px solid #EEE; margin-bottom: 20px; }}
         .metric-box {{ background: #FFF; padding: 20px; border-radius: 12px; border: 1px solid #E0E0E0; text-align: center; }}
         .ai-result-box {{ background-color: #F0FDF4 !important; border: 1px solid #BBF7D0 !important; border-radius: 12px; padding: 20px; margin-top: 15px; color: #14532D !important; }}
+        .stButton button {{ background-color: #EA1D2C !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 700 !important; width: 100%; }}
         
-        /* Botões e Tags */
-        .stButton button {{ background-color: #EA1D2C !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 700 !important; }}
-        .stButton button:hover {{ transform: translateY(-2px); box-shadow: 0 4px 12px rgba(234, 29, 44, 0.3); }}
-        .status-tag {{ padding: 6px 14px; border-radius: 100px; font-size: 12px; font-weight: 800; text-transform: uppercase; }}
-        .tag-URGENTE {{ background: #FEE2E2; color: #DC2626 !important; }}
-        .tag-MEDIA {{ background: #FEF3C7; color: #D97706 !important; }}
-        .tag-BAIXA {{ background: #D1FAE5; color: #059669 !important; }}
+        /* Remove headers padrão */
+        header[data-testid="stHeader"], footer, #MainMenu {{ display: none !important; }}
 
-        /* Esconde elementos padrão */
-        header[data-testid="stHeader"] {{ display: none; }}
-        #MainMenu {{ visibility: hidden; }}
-        footer {{ visibility: hidden; }}
-
-        /* Inputs - ORIGINAL MANTIDO */
-        .stTextInput > div > div > input,
-        input[type="text"],
-        textarea {{
-            background-color: #ffffff !important;
-            color: #0f172a !important;
-            border: 1px solid #E6E6E6 !important;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06) !important;
-            padding: 12px 14px !important;
-            border-radius: 12px !important;
+        /* Estilo Inputs */
+        .stTextInput > div > div > input {{
+            background-color: #ffffff !important; color: #0f172a !important;
+            border: 1px solid #E6E6E6 !important; padding: 12px 14px !important; border-radius: 12px !important;
         }}
 
-        /* --- HEADER CUSTOMIZADO (CORREÇÃO DE CAMADAS Z-INDEX) --- */
+        /* --- HEADER FIXO --- */
         .top-app-header {{
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 80px;
-            background-color: #FFFFFF;
-            border-bottom: 1px solid #E6E6E6;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 30px 0 370px;
-            z-index: 999999; /* Aumentado para garantir que fique sobre tudo */
+            position: fixed; top: 0; left: 0; width: 100%; height: 80px;
+            background-color: #FFFFFF; border-bottom: 1px solid #E6E6E6;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 30px 0 370px; z-index: 999999;
             box-shadow: 0 4px 10px rgba(0,0,0,0.03);
         }}
 
-        /* --- AJUSTES RESPONSIVOS (O FIX DO CELULAR) --- */
+        /* --- MOBILE LAYOUT FIX --- */
         /* Desktop */
         .main .block-container {{ 
-            padding-top: 120px !important; 
-            padding-left: 3rem !important; 
-            padding-right: 3rem !important; 
-            max-width: 100%; 
+            padding-top: 120px !important; padding-left: 3rem !important; padding-right: 3rem !important; max-width: 100%; 
         }}
 
-        /* Tablet */
-        @media (max-width: 1000px) {{
-            .top-app-header {{ padding: 0 20px !important; height: 72px !important; }}
-            .main .block-container {{ padding-top: 110px !important; }}
-        }}
-
-        /* Mobile - A CORREÇÃO CRÍTICA */
-        @media (max-width: 700px) {{
-            /* Força o header a ficar em linha e não ocupar a tela toda */
+        /* Mobile */
+        @media (max-width: 800px) {{
             .top-app-header {{
-                flex-direction: row !important; /* Força horizontal */
-                align-items: center !important;
-                justify-content: space-between !important;
-                gap: 8px !important;
-                padding: 0 15px !important;
-                height: 70px !important; /* Altura fixa */
-                flex-wrap: nowrap !important;
+                height: 70px !important; padding: 0 15px !important;
+                flex-direction: row !important; flex-wrap: nowrap !important; gap: 10px !important;
             }}
-            
-            /* Ajusta logo para caber */
             .header-left img {{ width: 40px !important; height: 40px !important; }}
             .header-left span {{ font-size: 1rem !important; }}
+            .header-right .loja-info {{ display: none; }}
             
-            /* Empurra o conteúdo para baixo do header fixo */
+            /* Padding crítico para abas */
             .main .block-container {{ 
-                padding-top: 100px !important; 
-                padding-left: 1rem !important; 
-                padding-right: 1rem !important; 
+                padding-top: 140px !important; padding-left: 1rem !important; padding-right: 1rem !important; 
             }}
-            
-            /* Ajustes menores */
             .css-card {{ padding: 16px !important; }}
-            .metric-box {{ padding: 14px !important; }}
         }}
     </style>
 
     <div class="top-app-header">
-        <div class="header-left" style="display:flex; align-items:center; gap:15px;">
-                <img src="{LOGO_URL}" style="width:108px; height:108px; border-radius:14px; object-fit:cover;" alt="iFood logo"/>
-                <span style="color:#ccc; font-size:1.2rem;">|</span>
-                <span style="font-size:1.1rem; font-weight:600; color:#555;">Portal do Parceiro</span>
+        <div class="header-left" style="display:flex; align-items:center; gap:12px;">
+            <img src="{LOGO_URL}" style="width:48px; height:48px; border-radius:10px; object-fit:cover;"/>
+            <span style="font-size:1.1rem; font-weight:700; color:#333;">Portal Parceiro</span>
+        </div>
+        <div class="header-right" style="display:flex; align-items:center; gap:15px;">
+            <div class="loja-info" style="text-align:right; line-height:1.2;">
+                <div style="font-size:14px; font-weight:700; color:#333;">Minha Loja</div>
+                <div style="font-size:11px; color:#00A85A; font-weight:700;">● ABERTA</div>
             </div>
-        <div class="header-right" style="display:flex; align-items:center; gap:20px;">
-            <div style="text-align:right; line-height:1.2;">
-                <div style="font-size:15px; font-weight:700; color:#333;">Minha Loja</div>
-                <div style="font-size:12px; color:#00A85A; font-weight:700;">● LOJA ABERTA</div>
-            </div>
-            <div style="width:45px; height:45px; background:#EA1D2C; border-radius:50%; color:white; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:1.2rem;">L</div>
+            <div style="width:40px; height:40px; background:#EA1D2C; border-radius:50%; color:white; display:flex; align-items:center; justify-content:center; font-weight:bold;">L</div>
         </div>
     </div>
     """
-
 st.markdown(carregar_css(), unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. FUNÇÕES AUXILIARES
+# 2. IA HELPER
 # ==============================================================================
-def render_phone_mockup(item, msg):
-    return f"""
-    <div style="border: 14px solid #222; border-radius: 36px; background: #fff; max-width: 300px; margin:0 auto; box-shadow: 0 30px 60px rgba(0,0,0,0.3); overflow:hidden;">
-        <div style="background:#F5F5F5; height:30px; text-align:center; font-size:10px; padding-top:8px; font-weight:bold; color:#333;">12:42</div>
-        <div style="padding:20px; height:450px; background: linear-gradient(135deg, #EA1D2C 0%, #C20E1B 100%);">
-            <div style="background: rgba(255,255,255,0.95); border-radius: 12px; padding: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.08); margin-top: 30px; border-left: 5px solid #EA1D2C; font-family: sans-serif;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
-                    <span style="font-size:10px; font-weight:bold; color:#333 !important;">IFOOD • AGORA</span>
-                    <span style="font-size:10px; color:#666 !important;">1m</span>
-                </div>
-                <div style="font-size:12px; font-weight:800; color:#000 !important; margin-bottom:3px;">{item} PRA VOCÊ! 😋</div>
-                <div style="font-size:11px; color:#444 !important; line-height:1.3;">{msg}</div>
-            </div>
-        </div>
-    </div>
-    """
-
-# ==============================================================================
-# 3. BACKEND (IA E LÓGICA)
-# ==============================================================================
-try:
-    DEFAULT_KEY = st.secrets["GEMINI_KEY"]
-except:
-    DEFAULT_KEY = ""
-
 @st.cache_resource
 def get_model(api_key):
     if not api_key: return None, None
     try:
         genai.configure(api_key=api_key)
-        safety = {
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-        }
+        safety = {HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE}
         for m in genai.list_models():
-            if 'flash' in m.name.lower() and 'exp' not in m.name.lower():
-                return genai.GenerativeModel(m.name), safety
+            if 'flash' in m.name.lower(): return genai.GenerativeModel(m.name), safety
         return genai.GenerativeModel('gemini-1.5-pro'), safety
     except: return None, None
 
-def _safe_generate(prompt_text: str):
-    if not model:
-        return "Offline: modelo indisponível."
-    try:
-        with st.spinner('Analisando...'):
-            return model.generate_content(prompt_text, safety_settings=safety).text.strip()
-    except ga_exceptions.ResourceExhausted:
-        logging.exception('ResourceExhausted from generative API')
-        return "Erro: recurso ou cota esgotada." 
-    except Exception as e:
-        logging.exception('Erro ao chamar a API generativa')
-        return f"Erro na geração da IA: {str(e)}"
-
 model, safety = get_model(DEFAULT_KEY)
 
-# ==============================================================================
-# 5. CONTEÚDO PRINCIPAL
-# ==============================================================================
-st.write("") # Espaço para o header fixo
+def _safe_generate(prompt):
+    if not model: return "Offline."
+    try: return model.generate_content(prompt, safety_settings=safety).text.strip()
+    except: return "Erro na IA."
 
-# Definição das Abas
-tab_sup, tab_vend, tab_crm, tab_chat = st.tabs(["🛡️ Central de Suporte", "💰 Engenharia de Vendas", "🎯 CRM Preditivo", "🤖 Genius Assistant"])
+def render_phone(item, msg):
+    return f"""
+    <div style="border:12px solid #222; border-radius:30px; background:#fff; max-width:280px; margin:0 auto; overflow:hidden;">
+        <div style="background:#EA1D2C; height:400px; padding:20px; display:flex; align-items:center;">
+            <div style="background:#fff; border-radius:10px; padding:15px; width:100%; box-shadow:0 4px 10px rgba(0,0,0,0.1);">
+                <div style="font-size:10px; font-weight:bold; color:#888;">IFOOD • AGORA</div>
+                <div style="font-weight:bold; margin:5px 0;">{item} 😋</div>
+                <div style="font-size:12px;">{msg}</div>
+            </div>
+        </div>
+    </div>"""
 
-# --- ABA SUPORTE ---
-with tab_sup:
+# ==============================================================================
+# 3. FRAGMENTOS DE UI (ISOLAMENTO DE ESTADO)
+# ==============================================================================
+
+# --- FRAGMENTO: SUPORTE ---
+@st.fragment
+def render_support_tab():
     if os.path.exists('suporte_ifood_simulado.csv'):
         df = pd.read_csv('suporte_ifood_simulado.csv')
         count = len(df)
     else: count = 0
     
     st.write("")
-    col_l, col_r = st.columns([1, 2.5])
-    with col_l:
+    c1, c2 = st.columns([1, 2.5])
+    with c1:
         st.markdown(f"""<div class="css-card" style="border-left:8px solid #EA1D2C;">
-            <h5 style="color:#666; margin:0;">FILA DE ATENDIMENTO</h5>
-            <h1 style="margin:10px 0; font-size:4rem; color:#333;">{count}</h1>
-            <strong style="color:#EA1D2C;">Tickets Pendentes</strong></div>""", unsafe_allow_html=True)
-        if st.button("⚡ INICIAR TRIAGEM AUTOMÁTICA"):
-            st.session_state['processed'] = True
+            <div style="color:#666; font-weight:700;">FILA</div>
+            <div style="font-size:3.5rem; font-weight:800; color:#333;">{count}</div>
+            <div style="color:#EA1D2C; font-weight:bold;">Tickets</div></div>""", unsafe_allow_html=True)
+        
+        # O clique aqui atualiza APENAS este fragmento, mantendo a aba ativa
+        if st.button("⚡ TRIAGEM"): st.session_state['processed'] = True
 
-    with col_r:
+    with c2:
         if st.session_state.get('processed') and count > 0:
-            st.markdown("##### 📋 Análise em Tempo Real")
+            st.markdown("##### 📋 Análise")
             for i, row in df.head(3).iterrows():
                 msg = row['mensagem_cliente']
-                prompt = f"Classifique (URGENTE/MEDIA/BAIXA) e justifique em 1 frase: '{msg}'"
-                res = _safe_generate(prompt)
-                
-                tag, cls = ("BAIXA", "tag-BAIXA")
-                if "URGENTE" in res.upper(): tag, cls = "URGENTE", "tag-URGENTE"
-                elif "MEDIA" in res.upper(): tag, cls = "MÉDIA", "tag-MEDIA"
-                
-                st.markdown(f"""<div class="css-card" style="padding:20px; margin-bottom:15px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span style="color:#EA1D2C; font-weight:800;">CHAMADO #{i+1}</span>
-                        <span class="status-tag {cls}">{tag}</span>
-                    </div>
-                    <div style="margin:12px 0; font-weight:600; font-size:1.1rem; color:#333;">"{msg}"</div>
-                    <div style="background:#F5F5F5; padding:10px; border-radius:8px; font-size:0.9rem; color:#555;">
-                        🤖 <strong>Genius:</strong> {res}
-                    </div>
-                </div>""", unsafe_allow_html=True)
-                time.sleep(0.1)
+                res = _safe_generate(f"Classifique (URGENTE/MEDIA/BAIXA) e resuma: '{msg}'")
+                cls = "tag-URGENTE" if "URGENTE" in res.upper() else "tag-BAIXA"
+                st.markdown(f"""<div class="css-card" style="padding:15px; margin-bottom:10px;">
+                    <span class="status-tag {cls}">Ticket #{i+1}</span>
+                    <div style="margin:8px 0; font-weight:600;">"{msg}"</div>
+                    <div style="color:#666; font-size:0.9rem;">🤖 {res}</div></div>""", unsafe_allow_html=True)
 
-# --- ABA VENDAS ---
-with tab_vend:
+# --- FRAGMENTO: VENDAS ---
+@st.fragment
+def render_sales_tab():
     st.write("")
     if os.path.exists('vendas_restaurante.csv'):
         df_v = pd.read_csv('vendas_restaurante.csv')
-        itens = []
-        for i in df_v['itens']: itens.extend([x.strip() for x in str(i).split('+')])
-        campeao = Counter(itens).most_common(1)[0][0]
-        total_vendas = df_v['valor_total'].sum()
+        itens = [x.strip() for i in df_v['itens'] for x in str(i).split('+')]
+        top = Counter(itens).most_common(1)[0][0] if itens else "N/A"
         
-        # CARTÕES DE MÉTRICA HTML
         c1, c2, c3 = st.columns(3)
-        c1.markdown(f"""<div class="metric-box"><div style="color:#888; font-weight:700; font-size:0.8rem; letter-spacing:1px;">FATURAMENTO</div><div style="color:#333; font-weight:800; font-size:2.2rem; margin:5px 0;">R$ {total_vendas:.2f}</div><div style="color:#00A85A; font-weight:bold; font-size:0.8rem;">▲ +12% vs Ontem</div></div>""", unsafe_allow_html=True)
-        c2.markdown(f"""<div class="metric-box"><div style="color:#888; font-weight:700; font-size:0.8rem; letter-spacing:1px;">TOTAL PEDIDOS</div><div style="color:#333; font-weight:800; font-size:2.2rem; margin:5px 0;">{len(df_v)}</div><div style="color:#666; font-size:0.8rem;">Hoje</div></div>""", unsafe_allow_html=True)
-        c3.markdown(f"""<div class="metric-box"><div style="color:#888; font-weight:700; font-size:0.8rem; letter-spacing:1px;">ITEM CAMPEÃO</div><div style="color:#EA1D2C; font-weight:800; font-size:1.8rem; margin:5px 0;">{campeao.upper()}</div><div style="color:#666; font-size:0.8rem;">Maior Conversão</div></div>""", unsafe_allow_html=True)
+        c1.markdown(f"""<div class="metric-box"><small>FATURAMENTO</small><h3>R$ {df_v['valor_total'].sum():.2f}</h3></div>""", unsafe_allow_html=True)
+        c2.markdown(f"""<div class="metric-box"><small>PEDIDOS</small><h3>{len(df_v)}</h3></div>""", unsafe_allow_html=True)
+        c3.markdown(f"""<div class="metric-box"><small>CAMPEÃO</small><h3 style="color:#EA1D2C;">{top}</h3></div>""", unsafe_allow_html=True)
         
         st.write("")
-        st.write("")
-        
-        c_ia, c_table = st.columns([1, 2])
+        c_ia, c_tb = st.columns([1, 2])
         with c_ia:
-            st.markdown(f"""<div class="css-card"><h3 style="color:#EA1D2C; margin-top:0;">Insight Genius 💡</h3><p style="font-size:1rem; line-height:1.5; color:#444;">O item <strong>{campeao}</strong> é responsável por grande parte das vendas. <br><br>A IA sugere criar um combo estratégico.</p></div>""", unsafe_allow_html=True)
-            if st.button("✨ GERAR OFERTA AGORA"):
-                with st.spinner("Analisando..."):
-                    prompt = f"Crie nome de combo e descrição curta para {campeao} + Batata. Sem titulos. Formato texto simples."
-                    res = _safe_generate(prompt)
-                    if res:
-                        st.markdown(f"""<div class="ai-result-box"><strong>✅ Sugestão Gerada:</strong><br><br>{res.replace(chr(10), '<br>')}</div>""", unsafe_allow_html=True)
-                    else: st.error("Tente novamente.")
-        
-        with c_table:
-            st.markdown("##### 📋 Últimos Pedidos")
-            st.dataframe(df_v, use_container_width=True, height=500)
+            # Clique aqui atualiza apenas o fragmento de vendas
+            if st.button("✨ CRIAR OFERTA"):
+                res = _safe_generate(f"Crie oferta curta para {top}. Sem titulos.")
+                st.markdown(f"""<div class="ai-result-box">{res}</div>""", unsafe_allow_html=True)
+        with c_tb:
+            st.dataframe(df_v, width=None, height=400, use_container_width=True)
 
-# --- ABA CRM ---
-with tab_crm:
+# --- FRAGMENTO: CRM ---
+@st.fragment
+def render_crm_tab():
     st.write("")
     if os.path.exists('vendas_restaurante.csv'):
         df_v = pd.read_csv('vendas_restaurante.csv')
         if 'cliente' in df_v.columns:
-            cli = df_v['cliente'].unique()
+            cli = st.selectbox("Cliente:", df_v['cliente'].unique())
+            itens_c = [x.strip() for i in df_v[df_v['cliente']==cli]['itens'] for x in str(i).split('+')]
+            fav = Counter(itens_c).most_common(1)[0][0] if itens_c else "?"
             
-            c_l, c_r = st.columns([1.5, 1])
-            with c_l:
-                st.markdown("### Segmentação Inteligente")
-                target = st.selectbox("Selecione o Cliente:", cli)
-                
-                hist = df_v[df_v['cliente'] == target]
-                itens_c = []
-                for i in hist['itens']: itens_c.extend([x.strip() for x in str(i).split('+')])
-                
-                if itens_c:
-                    fav = Counter(itens_c).most_common(1)[0][0]
-                    st.markdown(f"""<div class="css-card"><div style="display:flex; justify-content:space-between; align-items:center;"><div><small style="color:#999; font-weight:bold;">CLIENTE</small><br><span style="font-size:1.4rem; font-weight:700;">{target}</span></div><div style="text-align:right;"><small style="color:#999; font-weight:bold;">PRATO PREFERIDO</small><br><span style="font-size:1.4rem; font-weight:700; color:#EA1D2C;">{fav.upper()}</span></div></div></div>""", unsafe_allow_html=True)
-                    
-                    if st.button("🚀 ENVIAR PUSH NOTIFICATION"):
-                        prompt = f"Aja como iFood. Cliente: {target}. Favorito: {fav}. Escreva 1 push curta, urgente, emoji. Sem listas. Texto puro."
-                        res = _safe_generate(prompt)
-                        st.session_state['push_msg'] = res
-                        st.session_state['push_item'] = fav
-            
-            with c_r:
-                msg = st.session_state.get('push_msg', "Aguardando...")
-                item = st.session_state.get('push_item', "OFERTA").upper()
-                st.markdown(render_phone_mockup(item, msg), unsafe_allow_html=True)
-        else:
-            st.error("Coluna 'cliente' não encontrada no CSV.")
+            c1, c2 = st.columns([1.5, 1])
+            with c1:
+                st.info(f"Favorito de {cli}: **{fav}**")
+                # Clique aqui atualiza apenas o fragmento CRM
+                if st.button("🚀 ENVIAR PUSH"):
+                    res = _safe_generate(f"Push curta e urgente para {cli} sobre {fav}. Emoji.")
+                    st.session_state.update({'push_msg': res, 'push_item': fav})
+            with c2:
+                st.markdown(render_phone(st.session_state.get('push_item', 'Oferta'), st.session_state.get('push_msg', '...')), unsafe_allow_html=True)
 
-# --- ABA GENIUS ASSISTANT (CHAT OTIMIZADO) ---
-with tab_chat:
-    st.write("")
+# --- FRAGMENTO: CHAT (Já estava correto, mantido) ---
+@st.fragment
+def render_chat_tab():
     c_left, c_right = st.columns([2, 1])
-
-    # Função interna para processar a pergunta (COM RERUN)
-    def processar_pergunta(texto_pergunta):
-        if not texto_pergunta: return
-        
-        # Debounce: Evita duplicidade se o usuário clicar duas vezes
-        hist = st.session_state.get('chat_history', [])
-        if len(hist) > 0 and hist[-1].get('role') == 'user' and hist[-1].get('text') == texto_pergunta:
-             return
-
-        st.session_state['chat_history'].append({'role': 'user', 'text': texto_pergunta})
-        
-        # Gera resposta
-        resposta = "Offline"
-        if os.path.exists('vendas_restaurante.csv') and model:
-            try:
-                df = pd.read_csv('vendas_restaurante.csv')
-                ctx = df.tail(50).to_string(index=False)
-                
-                prompt = f"""
-                Atue como um Analista de BI do iFood.
-                Analise os dados recentes de vendas abaixo:
-                {ctx}
-                
-                PERGUNTA DO USUÁRIO: {texto_pergunta}
-                
-                Responda de forma curta, direta (máx 2 frases) e use emojis.
-                """
-                resposta = _safe_generate(prompt)
-            except: 
-                resposta = "Erro ao processar IA."
-        else:
-            resposta = "Erro: CSV ou Modelo Offline."
-        
-        st.session_state['chat_history'].append({'role': 'assistant', 'text': resposta})
-        
-        # CORREÇÃO: Força a interface a recarregar para mostrar a mensagem
-        _safe_rerun()
 
     with c_left:
         st.markdown("""<div class="css-card"><h4 style='color:#EA1D2C; margin:0;'>Genius Assistant 💬</h4><p style='font-size:0.9rem; color:#555;'>Pergunte sobre seus dados de vendas.</p></div>""", unsafe_allow_html=True)
 
-        if 'chat_history' not in st.session_state: 
-            st.session_state['chat_history'] = []
+        if 'chat_history' not in st.session_state: st.session_state['chat_history'] = []
 
-        # --- ÁREA DE INPUT ---
-        with st.form(key='chat_form', clear_on_submit=True):
-            u_input = st.text_input("Digite sua pergunta:", placeholder="Ex: Qual cliente comprou mais?")
-            enviou = st.form_submit_button("Enviar Pergunta")
-        
-        if enviou and u_input:
-            processar_pergunta(u_input)
+        def process_submit():
+            val = st.session_state.get("chat_input_widget")
+            if val:
+                st.session_state['chat_history'].append({'role': 'user', 'text': val})
+                resposta = "Analisando..."
+                ctx = ""
+                if os.path.exists('vendas_restaurante.csv') and model:
+                    try:
+                        df = pd.read_csv('vendas_restaurante.csv')
+                        ctx = df.tail(30).to_string(index=False)
+                        prompt = f"Dados: {ctx}. Pergunta: {val}. Responda curto e com emojis."
+                        resposta = _safe_generate(prompt)
+                    except: resposta = "Erro ao ler dados."
+                else:
+                    resposta = "Sistema Offline."
+                st.session_state['chat_history'].append({'role': 'assistant', 'text': resposta})
+                st.session_state.chat_input_widget = ""
 
-        # --- ÁREA DE MENSAGENS ---
+        def click_suggestion(txt):
+            st.session_state.chat_input_widget = txt
+            st.session_state['chat_history'].append({'role': 'user', 'text': txt})
+            ctx = ""
+            if os.path.exists('vendas_restaurante.csv'): 
+                ctx = pd.read_csv('vendas_restaurante.csv').tail(30).to_string(index=False)
+            resp = _safe_generate(f"Dados: {ctx}. Pergunta: {txt}. Responda curto e com emojis.")
+            st.session_state['chat_history'].append({'role': 'assistant', 'text': resp})
+            st.session_state.chat_input_widget = ""
+
+        st.text_input("Digite sua pergunta:", key="chat_input_widget", on_change=process_submit)
+        st.button("Enviar Pergunta", on_click=process_submit)
+
         history = st.session_state['chat_history']
-        
         pairs = []
         buffer = []
         for msg in history:
@@ -485,13 +315,28 @@ with tab_chat:
                 """, unsafe_allow_html=True)
 
     with c_right:
-        st.info("💡 **Sugestões Rápidas:**")
-        
-        if st.button("💰 Faturamento Total?"):
-            processar_pergunta("Qual o faturamento total somando tudo?")
-            
-        if st.button("🏆 Melhor Cliente?"):
-            processar_pergunta("Quem é o cliente que mais gastou?")
-            
-        if st.button("🍔 Item mais vendido?"):
-            processar_pergunta("Qual o produto mais vendido?")
+        st.info("💡 **Dicas:**")
+        st.button("💰 Faturamento Total?", on_click=click_suggestion, args=("Qual o faturamento total?",))
+        st.button("🏆 Melhor Cliente?", on_click=click_suggestion, args=("Quem é o melhor cliente?",))
+        st.button("🍔 Item mais vendido?", on_click=click_suggestion, args=("Item mais vendido?",))
+
+# ==============================================================================
+# 4. CONTEÚDO PRINCIPAL (ORQUESTRAÇÃO)
+# ==============================================================================
+st.write("") 
+
+# Cria as abas estáticas
+tab_sup, tab_vend, tab_crm, tab_chat = st.tabs(["🛡️ Central de Suporte", "💰 Engenharia de Vendas", "🎯 CRM Preditivo", "🤖 Genius Assistant"])
+
+# Renderiza cada aba dentro de seu contexto, chamando os fragmentos
+with tab_sup:
+    render_support_tab()
+
+with tab_vend:
+    render_sales_tab()
+
+with tab_crm:
+    render_crm_tab()
+
+with tab_chat:
+    render_chat_tab()
