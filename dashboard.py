@@ -33,7 +33,7 @@ def load_local_image(path):
 local_logo_data = load_local_image(LOCAL_HEADER_LOGO)
 if local_logo_data: LOGO_URL = local_logo_data
 
-# Helper de Favicon
+# Favicon
 if not os.path.exists(ROUND_ICON) and os.path.exists(ICON_PATH):
     try:
         from PIL import Image, ImageDraw
@@ -58,21 +58,17 @@ def carregar_css():
         * {{ font-family: 'Nunito Sans', sans-serif !important; }}
         [data-testid="stAppViewContainer"] {{ background-color: #F7F7F7 !important; }}
         
-        /* Selectbox e Inputs */
         div[data-baseweb="select"] > div {{ background-color: #FFFFFF !important; color: #000000 !important; border-radius: 12px !important; }}
         .stTextInput > div > div > input {{ background-color: #ffffff !important; color: #0f172a !important; border: 1px solid #E6E6E6 !important; padding: 12px 14px !important; border-radius: 12px !important; }}
 
-        /* Cards Profissionais */
         .css-card {{ background-color: #FFFFFF !important; border-radius: 16px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #F0F0F0; margin-bottom: 15px; }}
         .metric-box {{ background: #FFF; padding: 20px; border-radius: 12px; border: 1px solid #E0E0E0; text-align: center; }}
         
-        /* Tags de Urgência */
         .status-tag {{ padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }}
         .tag-URGENTE {{ background: #EA1D2C; color: #FFFFFF !important; box-shadow: 0 4px 10px rgba(234, 29, 44, 0.2); }}
         .tag-MEDIA {{ background: #FEF3C7; color: #D97706 !important; }}
         .tag-BAIXA {{ background: #D1FAE5; color: #059669 !important; }}
 
-        /* --- BOTÕES IFOOD (VERMELHO PURO EM TODOS OS ESTADOS) --- */
         .stButton button {{
             background-color: #EA1D2C !important;
             color: white !important;
@@ -84,23 +80,20 @@ def carregar_css():
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }}
         .stButton button:hover {{
-            background-color: #C21925 !important; /* Hover levemente escuro */
+            background-color: #C21925 !important;
             color: white !important;
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(234, 29, 44, 0.3) !important;
         }}
         .stButton button:active, .stButton button:focus {{
-            background-color: #A3151F !important; /* Active escuro */
+            background-color: #A3151F !important;
             color: white !important;
             border: none !important;
             box-shadow: none !important;
         }}
 
-        /* Header */
         header[data-testid="stHeader"], footer {{ display: none !important; }}
         .top-app-header {{ position: fixed; top: 0; left: 0; width: 100%; height: 80px; background-color: #FFFFFF; border-bottom: 1px solid #E6E6E6; display: flex; align-items: center; justify-content: space-between; padding: 0 30px 0 370px; z-index: 999999; }}
-        
-        /* Layout Mobile */
         .main .block-container {{ padding-top: 120px !important; padding-left: 3rem !important; padding-right: 3rem !important; max-width: 100%; }}
         
         @media (max-width: 800px) {{
@@ -190,30 +183,49 @@ def render_support_tab():
                 prompt = f"""Analise este ticket do iFood: '{msg}'. 
                 1. Classifique: URGENTE, MEDIA ou BAIXA.
                 2. Dê uma ação prática curta para evitar o CHURN (perda do cliente).
-                Responda no formato: CLASSIFICACAO | ACAO"""
+                3. Escreva uma resposta curta e empática para o cliente.
+                Responda estritamente no formato: CLASSIFICACAO | ACAO ANTI-CHURN | RESPOSTA AO CLIENTE"""
                 
                 res_raw = _safe_generate(prompt)
-                try:
-                    tag_txt, churn_action = res_raw.split('|', 1)
-                except:
-                    tag_txt, churn_action = "BAIXA", res_raw
+                
+                # TRATAMENTO DE ERRO DE API (OFFLINE)
+                if "Offline" in res_raw or "Erro" in res_raw:
+                    st.warning("⚠️ IA Offline ou Erro de Conexão. Verifique sua API Key.")
+                    continue
 
-                # Cores e Classes exatas do pedido original
+                # Parsing Robusto
+                parts = res_raw.split('|')
+                if len(parts) >= 3:
+                    tag_txt = parts[0].strip()
+                    churn_action = parts[1].strip()
+                    client_response = parts[2].strip()
+                else:
+                    tag_txt = "ANÁLISE"
+                    churn_action = res_raw
+                    client_response = "---"
+
                 cls = "tag-URGENTE" if "URGENTE" in tag_txt.upper() else ("tag-MEDIA" if "MEDIA" in tag_txt.upper() else "tag-BAIXA")
                 border_color = "#EA1D2C" if "URGENTE" in tag_txt.upper() else "#EEE"
                 
-                st.markdown(f"""
+                # HTML Compactado para evitar quebra de renderização
+                html_content = f"""
                 <div class="css-card" style="padding:20px; border-left: 5px solid {border_color}; position:relative;">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
                         <span style="font-weight:800; color:#333; font-size:1rem;">Ticket #{i+1}</span>
-                        <span class="status-tag {cls}">{tag_txt.strip()}</span>
+                        <span class="status-tag {cls}">{tag_txt}</span>
                     </div>
                     <div style="font-style:italic; color:#555; margin-bottom:15px;">"{msg}"</div>
-                    <div style="background:#F9FAFB; padding:12px; border-radius:8px; border:1px solid #E5E7EB;">
+                    <div style="margin-bottom:10px;">
                         <strong style="color:#EA1D2C; font-size:0.85rem;">🛡️ AÇÃO ANTI-CHURN:</strong>
-                        <span style="font-size:0.9rem; color:#374151;">{churn_action.strip()}</span>
+                        <div style="font-size:0.9rem; color:#374151; margin-top:2px;">{churn_action}</div>
                     </div>
-                </div>""", unsafe_allow_html=True)
+                    <div style="background:#F0F9FF; padding:12px; border-radius:8px; border:1px solid #E0F2FE;">
+                        <strong style="color:#0284C7; font-size:0.85rem;">💬 SUGESTÃO DE RESPOSTA:</strong>
+                        <div style="font-size:0.9rem; color:#374151; margin-top:2px; font-style:italic;">"{client_response}"</div>
+                    </div>
+                </div>
+                """
+                st.markdown(html_content, unsafe_allow_html=True)
 
 @st.fragment
 def render_sales_tab():
@@ -249,18 +261,13 @@ def render_crm_tab():
     if os.path.exists('vendas_restaurante.csv'):
         df_v = pd.read_csv('vendas_restaurante.csv')
         if 'cliente' in df_v.columns:
-            # Layout PC ajustado
             c_l, c_r = st.columns([1.2, 1])
-            
             with c_l:
                 st.markdown("### 🎯 Sniper CRM")
                 st.markdown("Selecione um cliente para enviar uma oferta única e personalizada.")
-                
                 cli = st.selectbox("Base de Clientes:", df_v['cliente'].unique())
-                
                 itens_c = [x.strip() for i in df_v[df_v['cliente']==cli]['itens'] for x in str(i).split('+')]
                 fav = Counter(itens_c).most_common(1)[0][0] if itens_c else "?"
-                
                 st.info(f"Prato favorito: **{fav}**")
                 
                 if st.button("🚀 DISPARAR OFERTA ÚNICA"):
@@ -278,35 +285,21 @@ def render_chat_tab():
     with c_left:
         st.markdown("""<div class="css-card"><h4 style='color:#EA1D2C; margin:0;'>Genius Assistant 💬</h4><p style='font-size:0.9rem; color:#555;'>Pergunte sobre seus dados de vendas.</p></div>""", unsafe_allow_html=True)
         
-        # Garante que o histórico existe
-        if 'chat_history' not in st.session_state: 
-            st.session_state['chat_history'] = []
+        if 'chat_history' not in st.session_state: st.session_state['chat_history'] = []
 
-        # Lógica centralizada de envio (CORREÇÃO DO LAG AQUI)
-        # Ao concatenar listas (+ [nova_msg]), criamos uma nova referência de memória
-        # Isso força o Streamlit a perceber a mudança e atualizar a UI imediatamente.
         def on_submission():
             txt = st.session_state.get("chat_input_w")
             if txt:
-                # 1. Adiciona User Msg (Nova Lista)
                 st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'user', 'text': txt}]
-                
-                # 2. Gera IA
                 ctx = ""
                 if os.path.exists('vendas_restaurante.csv'): 
                     ctx = pd.read_csv('vendas_restaurante.csv').tail(30).to_string(index=False)
                 resp = _safe_generate(f"Dados: {ctx}. Pergunta: {txt}. Responda curto e com emojis.")
-                
-                # 3. Adiciona Bot Msg (Nova Lista)
                 st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'assistant', 'text': resp}]
-                
-                # 4. Limpa input
                 st.session_state.chat_input_w = ""
 
-        # Callback para botões de sugestão
         def click_suggestion(sugestao):
-            st.session_state.chat_input_w = sugestao # Apenas visual
-            # Processa direto
+            st.session_state.chat_input_w = sugestao 
             st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'user', 'text': sugestao}]
             ctx = ""
             if os.path.exists('vendas_restaurante.csv'): 
@@ -315,23 +308,14 @@ def render_chat_tab():
             st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'assistant', 'text': resp}]
             st.session_state.chat_input_w = ""
 
-        # Input e Botão de Enviar
         st.text_input("Digite sua pergunta:", key="chat_input_w", on_change=on_submission)
         st.button("Enviar", on_click=on_submission)
 
-        # Renderização (Invertida)
         for msg in reversed(st.session_state['chat_history']):
             align = "right" if msg['role'] == 'user' else "left"
             bg = "#F3F4F6" if msg['role'] == 'user' else "#FFF0F0"
             color = "#333" if msg['role'] == 'user' else "#EA1D2C"
-            # Pequeno ajuste de margem para ficar bonito
-            st.markdown(f"""
-            <div style="text-align:{align}; margin-bottom:8px;">
-                <span style="background:{bg}; color:{color}; padding:8px 14px; border-radius:12px; display:inline-block; font-size:0.9rem; font-weight:500;">
-                    {msg['text']}
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div style="text-align:{align}; margin-bottom:8px;"><span style="background:{bg}; color:{color}; padding:8px 14px; border-radius:12px; display:inline-block; font-size:0.9rem; font-weight:500;">{msg['text']}</span></div>""", unsafe_allow_html=True)
 
     with c_right:
         st.info("💡 **Sugestões:**")
@@ -340,7 +324,7 @@ def render_chat_tab():
         st.button("🍔 Top Produto?", on_click=click_suggestion, args=("Produto mais vendido?",))
 
 # ==============================================================================
-# 4. RENDERIZAÇÃO FINAL (ORQUESTRAÇÃO DE ABAS)
+# 4. ORQUESTRAÇÃO
 # ==============================================================================
 st.write("") 
 tab_sup, tab_vend, tab_crm, tab_chat = st.tabs(["🛡️ Central de Suporte", "💰 Engenharia de Vendas", "🎯 CRM Preditivo", "🤖 Genius Assistant"])
