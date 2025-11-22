@@ -13,17 +13,16 @@ from google.api_core import exceptions as ga_exceptions
 import logging
 
 # ==============================================================================
-# 1. CONFIGURAÇÃO E ESTILOS (Separado para não quebrar)
+# 1. CONFIGURAÇÃO E ESTILOS
 # ==============================================================================
 LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Ifood_logo.svg/2560px-Ifood_logo.svg.png"
 
-# Tenta carregar imagem local `ifood_Logo.png` e embuti-la como data URI (garante exibição)
+# Tenta carregar imagem local `ifood_Logo.png` e embuti-la como data URI
 LOCAL_HEADER_LOGO = "ifood_Logo.png"
 if os.path.exists(LOCAL_HEADER_LOGO):
     try:
         with open(LOCAL_HEADER_LOGO, "rb") as f:
             encoded = base64.b64encode(f.read()).decode("utf-8")
-            # assume PNG or try to detect from filename
             mime = "image/png"
             if LOCAL_HEADER_LOGO.lower().endswith(".jpg") or LOCAL_HEADER_LOGO.lower().endswith(".jpeg"):
                 mime = "image/jpeg"
@@ -31,11 +30,10 @@ if os.path.exists(LOCAL_HEADER_LOGO):
     except Exception:
         pass
 
-# Ícone local (prefere versão arredondada `ifoo_logo_round.png` se existir)
+# Ícone local
 ICON_PATH = "ifood_icon.jpg"
 ROUND_ICON = "ifood_icon_round.png"
 
-# Tenta gerar ícone arredondado em tempo de execução se Pillow estiver disponível.
 def _try_generate_round_icon(src, out):
     try:
         from PIL import Image, ImageDraw
@@ -59,12 +57,8 @@ def _try_generate_round_icon(src, out):
         return False
     return False
 
-# Tenta criar o ícone arredondado (não gera erro se falhar)
-# Tenta gerar o ícone arredondado (se Pillow estiver disponível)
 _try_generate_round_icon(ICON_PATH, ROUND_ICON)
 
-# Use o ícone local preferencialmente: versão arredondada se existir, senão
-# a imagem original `ifood_icon.jpg`. Só em último caso use `LOGO_URL`.
 if os.path.exists(ROUND_ICON):
     page_icon = ROUND_ICON
 elif os.path.exists(ICON_PATH):
@@ -79,15 +73,13 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Função de rerun compatível com várias versões do Streamlit
+# Função de rerun para atualizar a tela instantaneamente
 def _safe_rerun():
     try:
-        # Método público (padrão)
         st.experimental_rerun()
         return
     except Exception:
         pass
-    # Tentativas com exceções internas de diferentes versões
     try:
         from streamlit.runtime.scriptrunner.script_runner import RerunException
         raise RerunException()
@@ -99,7 +91,6 @@ def _safe_rerun():
     except Exception:
         pass
     try:
-        # Último recurso: reinicia o processo (força reload)
         import sys
         sys.exit(0)
     except Exception:
@@ -113,33 +104,22 @@ def carregar_css():
         
         /* Layout Geral */
         [data-testid="stAppViewContainer"] {{ background-color: #F7F7F7 !important; }}
-        .main .block-container {{ padding-top: 120px !important; padding-left: 3rem !important; padding-right: 3rem !important; max-width: 100%; }}
+        /* Ajuste Desktop - Padding para compensar header fixo */
+        .main .block-container {{ padding-top: 100px !important; padding-left: 3rem !important; padding-right: 3rem !important; max-width: 100%; }}
         
-        /* Texto Geral */
-        /*p, h1, h2, h3, h4, div, label, li {{ color: #1F2937 !important; }}*/
-
-        /* --- CORREÇÃO DROPDOWN (Menu Preto no Branco) --- */
+        /* --- CORREÇÕES DE COMPONENTES --- */
         div[data-baseweb="select"] > div {{ background-color: #FFFFFF !important; color: #000000 !important; }}
         div[data-baseweb="select"] span {{ color: #000000 !important; }}
         ul[data-baseweb="menu"] {{ background-color: #FFFFFF !important; }}
         li[data-baseweb="option"] {{ color: #000000 !important; }}
         li[data-baseweb="option"]:hover {{ background-color: #FEE2E2 !important; color: #EA1D2C !important; font-weight: bold !important; }}
-        /* --- SELECTBOX / LISTAS: garantir fundo branco e texto legível --- */
-        /* Regras amplas para cobrir overlays e portais do BaseWeb/React */
-        div[data-testid="stSelectbox"], div[data-testid="stSelectbox"] div, div[role="listbox"], div[role="option"], select, option,
-        body div[role="listbox"], body ul[data-baseweb="menu"], body li[data-baseweb="option"],
-        .rc-virtual-list, .rc-virtual-list-holder, .baseweb-select-menu, .baseweb-select-option {{
+        
+        div[data-testid="stSelectbox"], div[data-testid="stSelectbox"] div, div[role="listbox"], div[role="option"], select, option {{
             background-color: #FFFFFF !important;
             color: #000000 !important;
         }}
-        div[role="option"]:hover, li[data-baseweb="option"]:hover, .baseweb-select-option:hover {{ background-color: #F3F4F6 !important; color: #000000 !important; }}
-        /* Força contraste do item selecionado dentro do input do select */
-        div[data-testid="stSelectbox"] > div, div[data-baseweb="select"] > div {{ background-color: #FFFFFF !important; color: #000000 !important; }}
         
-        /* Sidebar: do not force a red background on Streamlit sidebar in deployed app */
-        /* Keep default Streamlit sidebar styling to avoid breaking the hosted layout. */
-
-        /* --- COMPONENTES VISUAIS --- */
+        /* Cards e Boxes */
         .css-card {{ background-color: #FFFFFF !important; border-radius: 16px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); border: 1px solid #EEE; margin-bottom: 20px; }}
         .metric-box {{ background: #FFF; padding: 20px; border-radius: 12px; border: 1px solid #E0E0E0; text-align: center; }}
         .ai-result-box {{ background-color: #F0FDF4 !important; border: 1px solid #BBF7D0 !important; border-radius: 12px; padding: 20px; margin-top: 15px; color: #14532D !important; }}
@@ -153,18 +133,15 @@ def carregar_css():
         .tag-MEDIA {{ background: #FEF3C7; color: #D97706 !important; }}
         .tag-BAIXA {{ background: #D1FAE5; color: #059669 !important; }}
 
-        /* Esconde elementos padrão */
+        /* Esconde headers padrão do Streamlit */
         header[data-testid="stHeader"] {{ display: none; }}
         #MainMenu {{ visibility: hidden; }}
         footer {{ visibility: hidden; }}
-        /* Style específico para inputs do app (inclui o campo do chat) */
-        /* Alvo amplo: inputs de texto gerados pelo Streamlit e textareas */
+
+        /* Inputs de Texto */
         .stTextInput > div > div > input,
         input[type="text"],
-        textarea,
-        input[aria-label="Pergunte ao Genius Assistant"],
-        input[aria-label="Digite sua pergunta:"]
-        {{
+        textarea {{
             background-color: #ffffff !important;
             color: #0f172a !important;
             border: 1px solid #E6E6E6 !important;
@@ -172,10 +149,9 @@ def carregar_css():
             padding: 12px 14px !important;
             border-radius: 12px !important;
         }}
-        .stTextInput > div > div > input::placeholder,
-        input::placeholder,
-        textarea::placeholder {{ color: #9CA3AF !important; }}
-        /* Header custom (usar classe para facilitar overrides responsivos) */
+        .stTextInput > div > div > input::placeholder {{ color: #9CA3AF !important; }}
+
+        /* --- HEADER CUSTOMIZADO (FIXO) --- */
         .top-app-header {{
             position: fixed;
             top: 0;
@@ -187,47 +163,58 @@ def carregar_css():
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 30px 0 370px;
-            z-index: 9999;
+            padding: 0 30px 0 370px; /* Padding left grande no desktop para não cobrir sidebar se aberta */
+            z-index: 99999;
             box-shadow: 0 4px 10px rgba(0,0,0,0.03);
         }}
 
-        /* Ajustes responsivos */
+        /* --- RESPONSIVIDADE (CRÍTICO PARA MOBILE) --- */
         @media (max-width: 1000px) {{
-            .top-app-header {{ padding: 0 20px !important; height: 72px !important; }}
-            .main .block-container {{ padding-top: 110px !important; padding-left: 1.5rem !important; padding-right: 1.5rem !important; }}
-            /* keep default sidebar width on small screens */
+            .top-app-header {{ padding: 0 20px !important; height: 70px !important; }}
+            .main .block-container {{ padding-top: 90px !important; padding-left: 1.5rem !important; padding-right: 1.5rem !important; }}
         }}
 
         @media (max-width: 700px) {{
+            /* Header Mobile: Horizontal, menor e fixo */
             .top-app-header {{
-                flex-direction: column !important;
-                align-items: flex-start !important;
-                gap: 8px !important;
-                padding: 12px !important;
-                height: auto !important;
+                height: 60px !important;
+                padding: 0 15px !important;
+                display: flex !important;
+                flex-direction: row !important;
+                align-items: center !important;
+                justify-content: space-between !important;
+                gap: 10px !important;
             }}
-            .top-app-header .header-left {{ display:flex; align-items:center; gap:10px; }}
-            .top-app-header .header-right {{ display:flex; align-items:center; gap:12px; width:100%; justify-content:space-between; }}
-            .main .block-container {{ padding-top: 160px !important; padding-left: 12px !important; padding-right: 12px !important; }}
-            /* leave sidebar positioning to Streamlit default on very small screens */
+            .header-left img {{ width: 40px !important; height: 40px !important; }}
+            .header-left span {{ font-size: 0.95rem !important; }}
+            
+            /* Ajuste de conteúdo para não ficar debaixo do header */
+            .main .block-container {{ 
+                padding-top: 80px !important; 
+                padding-left: 12px !important; 
+                padding-right: 12px !important; 
+            }}
+            
+            /* Ajustes visuais menores */
             .css-card {{ padding: 16px !important; }}
             .metric-box {{ padding: 14px !important; }}
+            
+            /* Opcional: Simplificar header direito no mobile se precisar de espaço */
+            /* .header-right .loja-info {{ display: none; }} */
         }}
     </style>
 
     <div class="top-app-header">
-        <div class="header-left" style="display:flex; align-items:center; gap:15px;">
-                <img src="{LOGO_URL}" style="width:108px; height:108px; border-radius:14px; object-fit:cover;" alt="iFood logo"/>
-                <span style="color:#ccc; font-size:1.2rem;">|</span>
-                <span style="font-size:1.1rem; font-weight:600; color:#555;">Portal do Parceiro</span>
+        <div class="header-left" style="display:flex; align-items:center; gap:10px;">
+                <img src="{LOGO_URL}" style="width:50px; height:50px; border-radius:10px; object-fit:cover;" alt="iFood logo"/>
+                <span style="font-size:1.1rem; font-weight:700; color:#333;">Portal Parceiro</span>
             </div>
-        <div class="header-right" style="display:flex; align-items:center; gap:20px;">
-            <div style="text-align:right; line-height:1.2;">
-                <div style="font-size:15px; font-weight:700; color:#333;">Minha Loja</div>
-                <div style="font-size:12px; color:#00A85A; font-weight:700;">● LOJA ABERTA</div>
+        <div class="header-right" style="display:flex; align-items:center; gap:15px;">
+            <div class="loja-info" style="text-align:right; line-height:1.2;">
+                <div style="font-size:14px; font-weight:700; color:#333;">Minha Loja</div>
+                <div style="font-size:11px; color:#00A85A; font-weight:700;">● ABERTA</div>
             </div>
-            <div style="width:45px; height:45px; background:#EA1D2C; border-radius:50%; color:white; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:1.2rem;">L</div>
+            <div style="width:38px; height:38px; background:#EA1D2C; border-radius:50%; color:white; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:1.1rem;">L</div>
         </div>
     </div>
     """
@@ -235,7 +222,7 @@ def carregar_css():
 st.markdown(carregar_css(), unsafe_allow_html=True)
 
 # ==============================================================================
-# 2. FUNÇÕES AUXILIARES (HTML DO CELULAR SEPARADO)
+# 2. FUNÇÕES AUXILIARES
 # ==============================================================================
 def render_phone_mockup(item, msg):
     return f"""
@@ -257,7 +244,6 @@ def render_phone_mockup(item, msg):
 # ==============================================================================
 # 3. BACKEND (IA E LÓGICA)
 # ==============================================================================
-# Tenta pegar dos segredos do Streamlit, ou usa vazio se não achar
 try:
     DEFAULT_KEY = st.secrets["GEMINI_KEY"]
 except:
@@ -280,7 +266,6 @@ def get_model(api_key):
         return genai.GenerativeModel('gemini-1.5-pro'), safety
     except: return None, None
 
-# Helper to call the model with guarded error handling (avoids crash on quota/errors)
 def _safe_generate(prompt_text: str):
     if not model:
         return "Offline: modelo indisponível."
@@ -289,16 +274,11 @@ def _safe_generate(prompt_text: str):
             return model.generate_content(prompt_text, safety_settings=safety).text.strip()
     except ga_exceptions.ResourceExhausted:
         logging.exception('ResourceExhausted from generative API')
-        return "Erro: recurso ou cota esgotada. Tente novamente mais tarde ou verifique limites na conta." 
+        return "Erro: recurso esgotado. Tente novamente." 
     except Exception as e:
-        logging.exception('Erro ao chamar a API generativa')
-        return f"Erro na geração da IA: {str(e)}"
+        logging.exception('Erro API')
+        return f"Erro na geração: {str(e)}"
 
-# ==============================================================================
-# Sidebar removed: user requested no sidebar UI. Initialize model programmatically
-# ==============================================================================
-# Initialize model using DEFAULT_KEY (no sidebar input). If you want to provide
-# an API key dynamically, set DEFAULT_KEY or update this code to read from env.
 model, safety = get_model(DEFAULT_KEY)
 
 # ==============================================================================
@@ -376,7 +356,6 @@ with tab_vend:
                     prompt = f"Crie nome de combo e descrição curta para {campeao} + Batata. Sem titulos. Formato texto simples."
                     res = _safe_generate(prompt)
                     if res:
-                        # CORREÇÃO: MOSTRAR RESULTADO EM CAIXA VISÍVEL
                         st.markdown(f"""<div class="ai-result-box"><strong>✅ Sugestão Gerada:</strong><br><br>{res.replace(chr(10), '<br>')}</div>""", unsafe_allow_html=True)
                     else: st.error("Tente novamente.")
         
@@ -395,7 +374,6 @@ with tab_crm:
             c_l, c_r = st.columns([1.5, 1])
             with c_l:
                 st.markdown("### Segmentação Inteligente")
-                # O CSS lá em cima já corrigiu as cores deste Selectbox
                 target = st.selectbox("Selecione o Cliente:", cli)
                 
                 hist = df_v[df_v['cliente'] == target]
@@ -415,7 +393,6 @@ with tab_crm:
             with c_r:
                 msg = st.session_state.get('push_msg', "Aguardando...")
                 item = st.session_state.get('push_item', "OFERTA").upper()
-                # Chama a função que gera o HTML do celular
                 st.markdown(render_phone_mockup(item, msg), unsafe_allow_html=True)
         else:
             st.error("Coluna 'cliente' não encontrada no CSV.")
@@ -423,37 +400,24 @@ with tab_crm:
 # --- ABA GENIUS ASSISTANT ---
 with tab_chat:
     st.write("")
-    # Layout: 2/3 para Chat, 1/3 para Sugestões
     c_left, c_right = st.columns([2, 1])
 
-    # Função interna para processar a pergunta sem duplicar
     def processar_pergunta(texto_pergunta):
         if not texto_pergunta: return
         
-        # 1. Evita duplicidade: só ignora se já existir um par recente user->assistant
+        # Evita duplicidade simples se a última mensagem for igual (debounce básico)
         hist = st.session_state.get('chat_history', [])
-        if len(hist) >= 2 and hist[-2].get('role') == 'user' and hist[-1].get('role') == 'assistant' and hist[-2].get('text') == texto_pergunta:
-            return
+        if len(hist) > 0 and hist[-1].get('role') == 'user' and hist[-1].get('text') == texto_pergunta:
+             return
 
-        # 2. Adiciona pergunta ao histórico
         st.session_state['chat_history'].append({'role': 'user', 'text': texto_pergunta})
-
-        # Debug/tracing: registra início do processamento (visível no UI se ativado)
-        run_id = uuid.uuid4().hex[:8]
-        start_ts = datetime.datetime.utcnow()
-        st.session_state['last_process'] = {
-            'id': run_id,
-            'question': texto_pergunta,
-            'status': 'started',
-            'start': start_ts.isoformat() + 'Z'
-        }
         
-        # 3. Gera resposta da IA
+        # Gera resposta
         resposta = "Offline"
         if os.path.exists('vendas_restaurante.csv') and model:
             try:
                 df = pd.read_csv('vendas_restaurante.csv')
-                # Usa apenas as últimas 50 linhas para economizar tokens e ser rápido
+                # Usa apenas as últimas 50 linhas para economizar tokens
                 ctx = df.tail(50).to_string(index=False)
                 
                 prompt = f"""
@@ -465,77 +429,46 @@ with tab_chat:
                 
                 Responda de forma curta, direta (máx 2 frases) e use emojis.
                 """
-                
-                # Chama a IA
                 resposta = _safe_generate(prompt)
-                # Atualiza debug com fim e duração
-                end_ts = datetime.datetime.utcnow()
-                try:
-                    dur = (end_ts - start_ts).total_seconds()
-                except Exception:
-                    dur = None
-                st.session_state['last_process'].update({'status': 'done', 'end': end_ts.isoformat() + 'Z', 'duration_s': dur})
             except: 
                 resposta = "Erro ao processar IA."
+        else:
+            resposta = "Erro: CSV ou Modelo Offline."
         
-        # 4. Adiciona resposta ao histórico
         st.session_state['chat_history'].append({'role': 'assistant', 'text': resposta})
+        # Força o rerun imediato para mostrar a resposta
+        _safe_rerun()
 
     with c_left:
         st.markdown("""<div class="css-card"><h4 style='color:#EA1D2C; margin:0;'>Genius Assistant 💬</h4><p style='font-size:0.9rem; color:#555;'>Pergunte sobre seus dados de vendas.</p></div>""", unsafe_allow_html=True)
 
-        # Inicializa histórico
         if 'chat_history' not in st.session_state: 
             st.session_state['chat_history'] = []
 
-        # Debug toggle (mostra último processamento)
-        if 'show_debug' not in st.session_state:
-            st.session_state['show_debug'] = True
-        show_debug = st.checkbox('Mostrar debug de processamento', value=st.session_state['show_debug'], key='show_debug')
-        if show_debug and st.session_state.get('last_process'):
-            lp = st.session_state['last_process']
-            status = lp.get('status')
-            q = lp.get('question')
-            start = lp.get('start')
-            end = lp.get('end', '---')
-            dur = lp.get('duration_s', None)
-            st.markdown(f"""
-                <div style='background:#fff7ed; border:1px solid #ffd8a8; padding:10px; border-radius:8px; margin-bottom:8px;'>
-                    <div style='font-size:0.85rem; color:#92400e; font-weight:700;'>Debug: last process</div>
-                    <div style='font-size:0.85rem; color:#333;'><strong>id:</strong> {lp.get('id')} &nbsp; <strong>status:</strong> {status}</div>
-                    <div style='font-size:0.85rem; color:#333;'><strong>start:</strong> {start} &nbsp; <strong>end:</strong> {end} &nbsp; <strong>dur(s):</strong> {dur}</div>
-                    <div style='font-size:0.85rem; color:#333; margin-top:6px;'><strong>question:</strong> {q}</div>
-                </div>
-            """, unsafe_allow_html=True)
-
-        # --- 1. ÁREA DE INPUT (FIXA NO TOPO) ---
+        # --- ÁREA DE INPUT ---
         with st.form(key='chat_form', clear_on_submit=True):
-            u_input = st.text_input("Digite sua pergunta:", placeholder="Ex: Qual cliente comprou mais?", key="top_chat_input")
-            
-            # Botão de envio dentro do form
-            if st.form_submit_button("Enviar Pergunta"):
-                processar_pergunta(u_input)
+            u_input = st.text_input("Digite sua pergunta:", placeholder="Ex: Qual cliente comprou mais?")
+            enviou = st.form_submit_button("Enviar Pergunta")
+        
+        # Se o botão foi clicado E tem texto, processa
+        if enviou and u_input:
+            processar_pergunta(u_input)
 
-        # --- 2. ÁREA DE MENSAGENS (ORDEM INVERSA) ---
-        # Vamos criar pares [Pergunta, Resposta] e mostrar os mais novos primeiro
+        # --- ÁREA DE MENSAGENS (Histórico Reverso) ---
         history = st.session_state['chat_history']
         
-        # Agrupa em pares para exibição correta
+        # Agrupa em pares para exibição
         pairs = []
         buffer = []
         for msg in history:
             buffer.append(msg)
-            if len(buffer) == 2: # Temos uma pergunta e uma resposta
+            if len(buffer) == 2:
                 pairs.append(buffer)
                 buffer = []
+        if buffer: pairs.append(buffer) # Caso sobre alguma (ex: processando)
         
-        # Se sobrou uma pergunta sem resposta (processando), adiciona também
-        if buffer: pairs.append(buffer)
-        
-        # Exibe de trás para frente (Newest First)
-        st.write("") # Espaço
+        st.write("") 
         for pair in reversed(pairs):
-            # Mensagem do Usuário
             user_msg = pair[0]
             st.markdown(f"""
             <div style="text-align:right; margin-bottom:5px;">
@@ -545,7 +478,6 @@ with tab_chat:
             </div>
             """, unsafe_allow_html=True)
             
-            # Resposta da IA (se houver)
             if len(pair) > 1:
                 ai_msg = pair[1]
                 st.markdown(f"""
@@ -558,8 +490,6 @@ with tab_chat:
 
     with c_right:
         st.info("💡 **Sugestões Rápidas:**")
-        
-        # Botões que acionam a pergunta automaticamente
         if st.button("💰 Faturamento Total?"):
             processar_pergunta("Qual o faturamento total somando tudo?")
             
