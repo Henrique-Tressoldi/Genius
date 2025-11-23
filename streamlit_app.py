@@ -1,4 +1,4 @@
-import streamlit as st
+﻿import streamlit as st
 import pandas as pd
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
@@ -17,9 +17,9 @@ except: DEFAULT_KEY = ""
 
 # Configuração de Imagens
 LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Ifood_logo.svg/2560px-Ifood_logo.svg.png"
-LOCAL_HEADER_LOGO = "ifood_Logo.png"
-ICON_PATH = "ifood_icon.jpg"
-ROUND_ICON = "ifood_icon_round.png"
+LOCAL_HEADER_LOGO = "assets/ifood_Logo.png"
+ICON_PATH = "assets/ifood_icon.jpg"
+ROUND_ICON = "assets/ifood_icon_round.png"
 
 def load_local_image(path):
     if os.path.exists(path):
@@ -188,8 +188,8 @@ def render_phone(item, msg):
 @st.fragment
 def render_support_tab():
     count = 0
-    if os.path.exists('suporte_ifood_simulado.csv'):
-        df = pd.read_csv('suporte_ifood_simulado.csv')
+    if os.path.exists('data/suporte_ifood_simulado.csv'):
+        df = pd.read_csv('data/suporte_ifood_simulado.csv')
         count = len(df)
     
     st.write("")
@@ -253,8 +253,8 @@ def render_support_tab():
 @st.fragment
 def render_sales_tab():
     st.write("")
-    if os.path.exists('vendas_restaurante.csv'):
-        df_v = pd.read_csv('vendas_restaurante.csv')
+    if os.path.exists('data/vendas_restaurante.csv'):
+        df_v = pd.read_csv('data/vendas_restaurante.csv')
         itens = [x.strip() for i in df_v['itens'] for x in str(i).split('+')]
         top = Counter(itens).most_common(1)[0][0] if itens else "N/A"
         
@@ -281,8 +281,8 @@ def render_sales_tab():
 @st.fragment
 def render_crm_tab():
     st.write("")
-    if os.path.exists('vendas_restaurante.csv'):
-        df_v = pd.read_csv('vendas_restaurante.csv')
+    if os.path.exists('data/vendas_restaurante.csv'):
+        df_v = pd.read_csv('data/vendas_restaurante.csv')
         if 'cliente' in df_v.columns:
             c_l, c_r = st.columns([1.2, 1])
             with c_l:
@@ -316,8 +316,8 @@ def render_chat_tab():
             if txt:
                 st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'user', 'text': txt}]
                 ctx = ""
-                if os.path.exists('vendas_restaurante.csv'): 
-                    ctx = pd.read_csv('vendas_restaurante.csv').tail(30).to_string(index=False)
+                if os.path.exists('data/vendas_restaurante.csv'): 
+                    ctx = pd.read_csv('data/vendas_restaurante.csv').tail(30).to_string(index=False)
                 resp = _safe_generate(f"Dados: {ctx}. Pergunta: {txt}. Responda curto e com emojis.")
                 st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'assistant', 'text': resp}]
                 st.session_state.chat_input_w = ""
@@ -326,8 +326,8 @@ def render_chat_tab():
             st.session_state.chat_input_w = sugestao 
             st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'user', 'text': sugestao}]
             ctx = ""
-            if os.path.exists('vendas_restaurante.csv'): 
-                ctx = pd.read_csv('vendas_restaurante.csv').tail(30).to_string(index=False)
+            if os.path.exists('data/vendas_restaurante.csv'): 
+                ctx = pd.read_csv('data/vendas_restaurante.csv').tail(30).to_string(index=False)
             resp = _safe_generate(f"Dados: {ctx}. Pergunta: {sugestao}. Responda curto e com emojis.")
             st.session_state['chat_history'] = st.session_state['chat_history'] + [{'role': 'assistant', 'text': resp}]
             st.session_state.chat_input_w = ""
